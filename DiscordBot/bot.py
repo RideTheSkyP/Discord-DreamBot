@@ -1,15 +1,24 @@
 import discord
 import datetime
 import asyncio
+import os
+import shutil
+import youtube_dl
+import requests
 from discord.ext import commands
 from discord.utils import get
-
 
 joined, messages, guildId = 0, 0, 0
 token = open("token.txt", "r").read()
 
 bot = commands.Bot(command_prefix="!")
 bot.remove_command("help")
+
+
+ydlOptions = {
+    "format": "bestaudio",
+    "noplaylist": True
+}
 
 
 # todo redo with using a database || reading previous messages (preferred to read)
@@ -30,13 +39,55 @@ bot.remove_command("help")
 
 @bot.command(pass_context=True)
 async def join(ctx):
-    channel = ctx.author.voice.channel
-    await channel.connect()
+    channel = ctx.message.author.voice.channel
+    voice = get(ctx.bot.voice_clients, guild=ctx.guild)
+    if voice and voice.is_connected():
+        await voice.move_to(channel)
+    else:
+        voice = await channel.connect()
+    await ctx.send("Joined {}".format(channel))
 
 
 @bot.command(pass_context=True)
 async def leave(ctx):
-    await ctx.voice_client.disconnect()
+    channel = ctx.message.author.voice.channel
+    voice = get(ctx.bot.voice_clients)
+    if voice and voice.is_connected():
+        await voice.disconnect()
+        await ctx.send("Left {}".format(channel))
+
+
+def parse_duration(duration):
+    m, s = divmod(duration, 60)
+    h, m = divmod(m, 60)
+    return f'{h:d}:{m:02d}:{s:02d}'
+
+
+def search(author, arg):
+    with youtube_dl.YoutubeDL(ydlOptions) as ydl:
+        try:
+            requests.get(arg)
+        except:
+            info = ydl.extract_info(f"ytsearch:{arg}", download=False)["entries"][0]
+        else:
+            info = ydl.extract_info(arg, download=False)
+
+        embed = (discord.Embed(title="Currently playing: ", description=f"[{info['title']}]({info['webpage_url']})",
+                               color=discord.Color.blurple())
+                 .add_field(name="Duration", value=parse_duration(info["duration"]))
+                 .add_field(name="Requested by", value=author)
+                 .add_field(name="Uploader", value=f"[{info['uploader']}]({info['channel_url']})")
+                 .add_field(name="Queue", value="No song queued")
+                 .set_thumbnail(url=info["thumbnail"]))
+        return {"embed": embed, "source": info["formats"][0]["url"], "title": info["title"]}
+
+
+@bot.command(pass_context=True, aliases=["p"])
+async def play(ctx, video: str):
+    channel = ctx.author.voice_channel
+    voice = get(bot.voice_clients, guild=ctx.guild)
+    song = search(ctx.author.mention, video)
+    await ctx.channel.purge(limit=1)
 
 
 @bot.command(pass_context=True)
@@ -52,6 +103,11 @@ async def help(ctx):
     await ctx.send(embed=embed)
 
 
+@bot.command(pass_context=True)
+async def users(ctx):
+    await ctx.send(ctx.member_count)
+
+
 @bot.event
 async def on_ready():
     print(f"We have logged in as {bot.user}")
@@ -65,30 +121,6 @@ async def on_ready():
         print("Guild id", guild.id)
 
 
-# @bot.event
-# async def on_message(message):
-#     global messages
-#     messages += 1
-#     print(f"{message.channel}: {message.author}; {message.author.name}: {message.content}")
-#     id = bot.get_guild(guildId)
-#
-#     if message.author == bot.user:
-#         return
-
-    # if message.content == "!hello":
-    #     await message.channel.send("Hi {}".format(message.author))
-    # elif message.content == "!help":
-    #     embed = discord.Embed(title="Help", description="Commands")
-    #     embed.add_field(name="!hello", value="Greets the user")
-    #     embed.add_field(name="!users", value="Prints number of users")
-#         await message.channel.send(content=None, embed=embed)
-#     elif message.content == "!users":
-#         await message.channel.send(f"""Number of Members: {id.member_count}""")
-#
-#     # if str(message.channel) == "general":
-#     #     print(message.channel)
-#
-#
 # # todo join, rejoin, wait after everyone leaves, leave after no one mentions for some time || task ended
 # @bot.event
 # async def on_voice_state_update(member, before, after):
