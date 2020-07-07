@@ -8,7 +8,7 @@ import requests
 from discord.ext import commands
 from discord.utils import get
 
-joined, messages, guildId = 0, 0, 0
+joined, messages, guildId, songQueue, message = 0, 0, 0, {}, {}
 token = open("token.txt", "r").read()
 
 bot = commands.Bot(command_prefix="!")
@@ -18,6 +18,9 @@ bot.remove_command("help")
 ydlOptions = {
     "format": "bestaudio",
     "noplaylist": True
+}
+ffmpegOptions = {
+    "options": "-vn"
 }
 
 
@@ -63,6 +66,14 @@ def parse_duration(duration):
     return f'{h:d}:{m:02d}:{s:02d}'
 
 
+async def edit_message(ctx):
+    embed = songQueue[ctx.guild][0]["embed"]
+    content = "\n".join([f"({songQueue[ctx.guild].index(i)}) {i['title']}" for i in songQueue[ctx.guild][1:]]) \
+        if len(songQueue[ctx.guild]) > 1 else "No song queued"
+    embed.set_field_at(index=3, name="File: ", value=content, inline=False)
+    await message[ctx.guild].edit(embed=embed)
+
+
 def search(author, arg):
     with youtube_dl.YoutubeDL(ydlOptions) as ydl:
         try:
@@ -82,12 +93,39 @@ def search(author, arg):
         return {"embed": embed, "source": info["formats"][0]["url"], "title": info["title"]}
 
 
+def playNext(ctx):
+    voice = get(bot.voice_clients, guild=ctx.guild)
+    if len(songQueue[ctx.guild]) > 1:
+        del songQueue[ctx.guild][0]
+        asyncio.run_coroutine_threadsafe(edit_message(ctx), bot.loop)
+        voice.play(discord.FFmpegPCMAudio(songQueue[ctx.guild][0]["source"], **ffmpegOptions),
+                   after=lambda e: playNext(ctx))
+        voice.is_playing()
+    else:
+        asyncio.run_coroutine_threadsafe(voice.disconnect(), bot.loop)
+        asyncio.run_coroutine_threadsafe(message[ctx.guild].delete(), bot.loop)
+
+
 @bot.command(pass_context=True, aliases=["p"])
 async def play(ctx, video: str):
-    channel = ctx.author.voice_channel
+    channel = ctx.message.author.voice.channel
     voice = get(bot.voice_clients, guild=ctx.guild)
     song = search(ctx.author.mention, video)
     await ctx.channel.purge(limit=1)
+
+    if voice and voice.is_connected():
+        await voice.move_to(channel)
+    else:
+        voice = await channel.connect()
+
+    if not voice.is_playing():
+        songQueue[ctx.guild] = [song]
+        message[ctx.guild] = await ctx.send(embed=song["embed"])
+        voice.play(discord.FFmpegPCMAudio(song["source"], **ffmpegOptions), after=lambda e: playNext(ctx))
+        voice.is_playing()
+    else:
+        songQueue[ctx.guild].append(song)
+        await edit_message(ctx)
 
 
 @bot.command(pass_context=True)
