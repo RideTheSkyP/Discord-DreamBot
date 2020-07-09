@@ -129,6 +129,19 @@ async def play(ctx, video: str):
 
 
 @bot.command(pass_context=True)
+async def pause(ctx):
+    voice = get(bot.voice_clients, guild=ctx.guild)
+    if voice.is_connected():
+        await ctx.channel.purge(limit=1)
+        if voice.is_playing():
+            await ctx.send("Music paused", delete_after=5)
+            voice.pause()
+        else:
+            await ctx.send("Music resumed", delete_after=5)
+            voice.resume()
+
+
+@bot.command(pass_context=True)
 async def hello(ctx):
     await ctx.send("Hi {}".format(ctx.author))
 
