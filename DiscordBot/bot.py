@@ -14,7 +14,6 @@ token = open("token.txt", "r").read()
 bot = commands.Bot(command_prefix="!")
 bot.remove_command("help")
 
-
 ydlOptions = {
     "format": "bestaudio",
     "noplaylist": True
@@ -152,6 +151,15 @@ async def help(ctx):
     embed.add_field(name="!hello", value="Greets the user")
     embed.add_field(name="!users", value="Prints number of users")
     await ctx.send(embed=embed)
+
+
+@bot.command(pass_context=True)
+async def skip(ctx):
+    voice = get(bot.voice_clients, guild=ctx.guild)
+    if voice.is_playing():
+        await ctx.channel.purge(limit=1)
+        await ctx.send("Music skipped", delete_after=5)
+        voice.stop()
 
 
 @bot.command(pass_context=True)
