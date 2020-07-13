@@ -8,13 +8,16 @@ import requests
 from discord.ext import commands
 from discord.utils import get
 
-joined, messages, guildId, songQueue, message = 0, 0, 0, {}, {}
+# todo remove all songs if no one using bot
+joined, messages, guildId, songQueue, message, musicTitles = 0, 0, 0, {}, {}, {}
 token = open("token.txt", "r").read()
 
 bot = commands.Bot(command_prefix="!")
 bot.remove_command("help")
-path = "data/audio/cache/"
+musicPath = "data/audio/cache/"
+ffmpegPath = ""
 
+# check what happen if remove socket timeout
 ydlOptions = {
     "socket_timeout": 5,
     "source_address": "0.0.0.0",
@@ -36,7 +39,7 @@ ydlOptions = {
         "-ar", "16000"
     ],
     "prefer_ffmpeg": True,
-    "ffmpeg_location": r""
+    "ffmpeg_location": ffmpegPath
 }
 
 ffmpegOptions = {
@@ -68,7 +71,7 @@ async def join(ctx):
         await voice.move_to(channel)
     else:
         voice = await channel.connect()
-    await ctx.send("Joined {}".format(channel))
+    await ctx.send("Joined {}".format(channel), delete_after=5)
 
 
 @bot.command(pass_context=True)
@@ -77,7 +80,7 @@ async def leave(ctx):
     voice = get(ctx.bot.voice_clients)
     if voice and voice.is_connected():
         await voice.disconnect()
-        await ctx.send("Left {}".format(channel))
+        await ctx.send("Left {}".format(channel), delete_after=5)
 
 
 def parse_duration(duration):
@@ -99,35 +102,41 @@ def search(author, arg):
         try:
             requests.get(arg)
         except:
-            info = ydl.extract_info(f"ytsearch:{arg}", download=False)["entries"][0]
+            info = ydl.extract_info(f"ytsearch:{arg}", download=True)["entries"][0]
         else:
-            info = ydl.extract_info(arg, download=False)
+            info = ydl.extract_info(arg, download=True)
+
+        filename = ydl.prepare_filename(info)
+        songTitle = os.path.splitext(filename)[0]
+        f = os.path.join(songTitle + ".mp3")
+
+        try:
+            if os.path.exists(os.path.join(musicPath+filename)):
+                os.remove(os.path.join(musicPath+filename))
+            else:
+                pass
+        except Exception as e:
+            print(e)
 
         embed = (discord.Embed(title="Currently playing: ", description=f"[{info['title']}]({info['webpage_url']})",
-                               color=discord.Color.blurple())
+                               color=discord.Color.purple())
                  .add_field(name="Duration", value=parse_duration(info["duration"]))
                  .add_field(name="Requested by", value=author)
                  .add_field(name="Uploader", value=f"[{info['uploader']}]({info['channel_url']})")
                  .add_field(name="Queue", value="No song queued")
                  .set_thumbnail(url=info["thumbnail"]))
 
-        ydl.download([arg])
-
-        for file in os.listdir(path):
-            if file.endswith(".mp3"):
-                print("File to rename: ", file)
-                os.rename(os.path.join(path, file), path+"song.mp3")
-                print("Renamed file: ", file)
-
-        return {"embed": embed, "source": info["formats"][0]["url"], "title": info["title"]}
+        return {"embed": embed, "source": info["formats"][0]["url"], "title": info["title"]}, f
 
 
 def playNext(ctx):
     voice = get(bot.voice_clients, guild=ctx.guild)
-    if len(songQueue[ctx.guild]) > 1:
-        del songQueue[ctx.guild][0]
+    if len(songQueue[ctx.guild]) > 1 and len(musicTitles[ctx.guild]) > 1:
+        song = musicTitles[ctx.guild][0]
+        del songQueue[ctx.guild][0], musicTitles[ctx.guild][0]
+        os.remove(song)
         asyncio.run_coroutine_threadsafe(edit_message(ctx), bot.loop)
-        voice.play(discord.FFmpegPCMAudio(songQueue[ctx.guild][0]["source"], **ffmpegOptions),
+        voice.play(discord.FFmpegPCMAudio(executable=ffmpegPath, source=musicTitles[ctx.guild][0]),
                    after=lambda e: playNext(ctx))
         voice.is_playing()
     else:
@@ -135,11 +144,11 @@ def playNext(ctx):
         asyncio.run_coroutine_threadsafe(message[ctx.guild].delete(), bot.loop)
 
 
-@bot.command(pass_context=True, aliases=["p"])
+@bot.command(pass_context=True, aliases=["p", "PLAY", "P"])
 async def play(ctx, video: str):
     channel = ctx.message.author.voice.channel
     voice = get(bot.voice_clients, guild=ctx.guild)
-    song = search(ctx.author.mention, video)
+    song, file = search(ctx.author.mention, video)
     await ctx.channel.purge(limit=1)
 
     if voice and voice.is_connected():
@@ -147,21 +156,19 @@ async def play(ctx, video: str):
     else:
         voice = await channel.connect()
 
-    # music = song["source"]
-
     if not voice.is_playing():
-
-        # for file in os.listdir(path):
-        #     if file.endswith(".mp3"):
-        #         os.remove(file)
-
         songQueue[ctx.guild] = [song]
+        musicTitles[ctx.guild] = [file]
         message[ctx.guild] = await ctx.send(embed=song["embed"])
 
-        voice.play(discord.FFmpegPCMAudio(path+"song.mp3"), after=lambda e: playNext(ctx))
+        voice.play(discord.FFmpegPCMAudio(executable=ffmpegPath, source=file), after=lambda e: playNext(ctx))
         voice.is_playing()
     else:
+        print("Song queued", ctx.guild, song, file)
         songQueue[ctx.guild].append(song)
+        print(songQueue, "\n", songQueue[ctx.guild])
+        musicTitles[ctx.guild].append(file)
+        print(musicTitles)
         await edit_message(ctx)
 
 
@@ -230,9 +237,9 @@ async def on_ready():
 async def on_member_join(member):
     global joined
     joined += 1
-    for channel in member.guild.channels:
-        if str(channel) == "general":
-            print("Someone connected")
+    # for channel in member.guild.channels:
+    #     if str(channel) == "general":
+    #         print("Someone connected")
     await member.create_dm()
     await member.dm_channel.send(f'Hi {member.name}, welcome to my Discord server!')
 
@@ -240,7 +247,6 @@ async def on_member_join(member):
 @bot.event
 async def on_member_update(before, after):
     nickname = after.nick
-    print(before.nick, after.nick)
     if nickname:
         if nickname.lower().count("dream") > 0:
             lastNickname = before.nick
