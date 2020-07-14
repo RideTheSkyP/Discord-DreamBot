@@ -93,7 +93,7 @@ async def edit_message(ctx):
     embed = songQueue[ctx.guild][0]["embed"]
     content = "\n".join([f"({songQueue[ctx.guild].index(i)}) {i['title']}" for i in songQueue[ctx.guild][1:]]) \
         if len(songQueue[ctx.guild]) > 1 else "No song queued"
-    embed.set_field_at(index=3, name="File: ", value=content, inline=False)
+    embed.set_field_at(index=3, name="Queue: ", value=content, inline=False)
     await message[ctx.guild].edit(embed=embed)
 
 
@@ -133,6 +133,7 @@ def playNext(ctx):
     voice = get(bot.voice_clients, guild=ctx.guild)
     if len(songQueue[ctx.guild]) > 1 and len(musicTitles[ctx.guild]) > 1:
         song = musicTitles[ctx.guild][0]
+        # voice.stop()
         del songQueue[ctx.guild][0], musicTitles[ctx.guild][0]
         os.remove(song)
         asyncio.run_coroutine_threadsafe(edit_message(ctx), bot.loop)
@@ -160,19 +161,37 @@ async def play(ctx, video: str):
         songQueue[ctx.guild] = [song]
         musicTitles[ctx.guild] = [file]
         message[ctx.guild] = await ctx.send(embed=song["embed"])
-
         voice.play(discord.FFmpegPCMAudio(executable=ffmpegPath, source=file), after=lambda e: playNext(ctx))
         voice.is_playing()
     else:
-        print("Song queued", ctx.guild, song, file)
         songQueue[ctx.guild].append(song)
-        print(songQueue, "\n", songQueue[ctx.guild])
         musicTitles[ctx.guild].append(file)
-        print(musicTitles)
         await edit_message(ctx)
 
 
-@bot.command(pass_context=True)
+@bot.command(pass_context=True, aliases=["REPEAT", "r", "R", "omt", "OMT", "again", "AGAIN", "replay", "REPLAY"])
+async def repeat(ctx):
+    channel = ctx.message.author.voice.channel
+    voice = get(bot.voice_clients, guild=ctx.guild)
+    await ctx.channel.purge(limit=1)
+
+    if voice and voice.is_connected():
+        await voice.move_to(channel)
+    else:
+        voice = await channel.connect
+
+    if voice.is_playing():
+        voice.pause()
+        voice.play(discord.FFmpegPCMAudio(executable=ffmpegPath, source=musicTitles[ctx.guild][0]),
+                   after=lambda e: playNext(ctx))
+        voice.is_playing()
+    else:
+        ctx.send("Nothing to repeat", delete_after=5)
+
+    await edit_message(ctx)
+
+
+@bot.command(pass_context=True, aliases=["stop", "STOP", "s", "S"])
 async def pause(ctx):
     voice = get(bot.voice_clients, guild=ctx.guild)
     if voice.is_connected():
