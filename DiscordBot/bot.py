@@ -8,8 +8,7 @@ import requests
 from discord.ext import commands
 from discord.utils import get
 
-# todo remove all songs if no one using bot
-joined, messages, guildId, songQueue, message, musicTitles = 0, 0, 0, {}, {}, {}
+joined, messages, guildId, songQueue, message, musicTitles, repeat, i = 0, 0, 0, {}, {}, {}, False, 0
 token = open("token.txt", "r").read()
 
 bot = commands.Bot(command_prefix="!")
@@ -98,6 +97,8 @@ async def edit_message(ctx):
 
 
 def search(author, arg):
+    global i
+
     with youtube_dl.YoutubeDL(ydlOptions) as ydl:
         try:
             requests.get(arg)
@@ -107,8 +108,10 @@ def search(author, arg):
             info = ydl.extract_info(arg, download=True)
 
         filename = ydl.prepare_filename(info)
+        i += 1
         songTitle = os.path.splitext(filename)[0]
-        f = os.path.join(songTitle + ".mp3")
+        os.rename(songTitle + ".mp3", songTitle + f"{i}.mp3")
+        f = os.path.join(songTitle + f"{i}.mp3")
 
         try:
             if os.path.exists(os.path.join(musicPath+filename)):
@@ -131,11 +134,17 @@ def search(author, arg):
 
 def playNext(ctx):
     voice = get(bot.voice_clients, guild=ctx.guild)
-    if len(songQueue[ctx.guild]) > 1 and len(musicTitles[ctx.guild]) > 1:
-        song = musicTitles[ctx.guild][0]
-        # voice.stop()
+    global repeat
+
+    song = musicTitles[ctx.guild][0]
+    if not repeat:
         del songQueue[ctx.guild][0], musicTitles[ctx.guild][0]
         os.remove(song)
+    else:
+        await ctx.send("Repeat requested by: {}".format(ctx.message.author.voice.channel), delete_after=5)
+        repeat = False
+
+    if len(songQueue[ctx.guild]) > 0 and len(musicTitles[ctx.guild]) > 0:
         asyncio.run_coroutine_threadsafe(edit_message(ctx), bot.loop)
         voice.play(discord.FFmpegPCMAudio(executable=ffmpegPath, source=musicTitles[ctx.guild][0]),
                    after=lambda e: playNext(ctx))
@@ -143,6 +152,8 @@ def playNext(ctx):
     else:
         asyncio.run_coroutine_threadsafe(voice.disconnect(), bot.loop)
         asyncio.run_coroutine_threadsafe(message[ctx.guild].delete(), bot.loop)
+        deleteFiles()
+        repeat = False
 
 
 @bot.command(pass_context=True, aliases=["p", "PLAY", "P"])
@@ -171,9 +182,13 @@ async def play(ctx, video: str):
 
 @bot.command(pass_context=True, aliases=["REPEAT", "r", "R", "omt", "OMT", "again", "AGAIN", "replay", "REPLAY"])
 async def repeat(ctx):
+    global repeat
+
     channel = ctx.message.author.voice.channel
     voice = get(bot.voice_clients, guild=ctx.guild)
     await ctx.channel.purge(limit=1)
+
+    repeat = True
 
     if voice and voice.is_connected():
         await voice.move_to(channel)
@@ -181,10 +196,7 @@ async def repeat(ctx):
         voice = await channel.connect
 
     if voice.is_playing():
-        voice.pause()
-        voice.play(discord.FFmpegPCMAudio(executable=ffmpegPath, source=musicTitles[ctx.guild][0]),
-                   after=lambda e: playNext(ctx))
-        voice.is_playing()
+        voice.stop()
     else:
         ctx.send("Nothing to repeat", delete_after=5)
 
@@ -237,11 +249,10 @@ async def on_ready():
     perms = discord.Permissions(permissions=506719280)
     invite_link = discord.utils.oauth_url(bot.user, permissions=perms)
     print(f"Use this link to add the bot to your server: {invite_link}")
-    global guildId
+    deleteFiles()
+
     for guild in bot.guilds:
-        print("{} is connected to the following guild: {}".format(bot.user, guild.name))
-        guildId = guild.id
-        print("Guild id", guild.id)
+        print("{} is connected to the following guild: {}.Guild id: {}".format(bot.user, guild.name, guild.id))
 
 
 # # todo join, rejoin, wait after everyone leaves, leave after no one mentions for some time || task ended
@@ -273,6 +284,11 @@ async def on_member_update(before, after):
                 await after.edit(nick=lastNickname)
             else:
                 await after.edit(nick="Nickname dream is reserved by bot, please change yours role or nickname")
+
+
+def deleteFiles():
+    for files in os.listdir(musicPath):
+        os.remove(os.path.join(musicPath + files))
 
 
 # bot.loop.create_task(update_stats())
