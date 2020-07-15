@@ -11,7 +11,7 @@ from discord.utils import get
 joined, messages, guildId, songQueue, message, musicTitles, repeat, i = 0, 0, 0, {}, {}, {}, False, 0
 token = open("token.txt", "r").read()
 
-bot = commands.Bot(command_prefix="!")
+bot = commands.Bot(command_prefix=".")
 bot.remove_command("help")
 musicPath = "data/audio/cache/"
 ffmpegPath = ""
@@ -30,10 +30,10 @@ ydlOptions = {
     "format": "bestaudio/best",
     "noplaylist": True,
     "postprocessors": [{
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
-                    "preferredquality": "192"
-                }],
+        "key": "FFmpegExtractAudio",
+        "preferredcodec": "mp3",
+        "preferredquality": "192"
+    }],
     "postprocessor_args": [
         "-ar", "16000"
     ],
@@ -66,10 +66,13 @@ ffmpegOptions = {
 async def join(ctx):
     channel = ctx.message.author.voice.channel
     voice = get(ctx.bot.voice_clients, guild=ctx.guild)
+    deleteFiles()
+
     if voice and voice.is_connected():
         await voice.move_to(channel)
     else:
         voice = await channel.connect()
+
     await ctx.send("Joined {}".format(channel), delete_after=5)
 
 
@@ -78,6 +81,7 @@ async def leave(ctx):
     channel = ctx.message.author.voice.channel
     voice = get(ctx.bot.voice_clients)
     if voice and voice.is_connected():
+        deleteFiles()
         await voice.disconnect()
         await ctx.send("Left {}".format(channel), delete_after=5)
 
@@ -114,8 +118,8 @@ def search(author, arg):
         f = os.path.join(songTitle + f"{i}.mp3")
 
         try:
-            if os.path.exists(os.path.join(musicPath+filename)):
-                os.remove(os.path.join(musicPath+filename))
+            if os.path.exists(os.path.join(musicPath + filename)):
+                os.remove(os.path.join(musicPath + filename))
             else:
                 pass
         except Exception as e:
@@ -141,7 +145,6 @@ def playNext(ctx):
         del songQueue[ctx.guild][0], musicTitles[ctx.guild][0]
         os.remove(song)
     else:
-        await ctx.send("Repeat requested by: {}".format(ctx.message.author.voice.channel), delete_after=5)
         repeat = False
 
     if len(songQueue[ctx.guild]) > 0 and len(musicTitles[ctx.guild]) > 0:
@@ -158,62 +161,71 @@ def playNext(ctx):
 
 @bot.command(pass_context=True, aliases=["p", "PLAY", "P"])
 async def play(ctx, video: str):
-    channel = ctx.message.author.voice.channel
-    voice = get(bot.voice_clients, guild=ctx.guild)
-    song, file = search(ctx.author.mention, video)
-    await ctx.channel.purge(limit=1)
+    try:
+        channel = ctx.message.author.voice.channel
+        voice = get(bot.voice_clients, guild=ctx.guild)
+        song, file = search(ctx.author.mention, video)
+        await ctx.channel.purge(limit=1)
 
-    if voice and voice.is_connected():
-        await voice.move_to(channel)
-    else:
-        voice = await channel.connect()
+        if voice and voice.is_connected():
+            await voice.move_to(channel)
+        else:
+            voice = await channel.connect()
 
-    if not voice.is_playing():
-        songQueue[ctx.guild] = [song]
-        musicTitles[ctx.guild] = [file]
-        message[ctx.guild] = await ctx.send(embed=song["embed"])
-        voice.play(discord.FFmpegPCMAudio(executable=ffmpegPath, source=file), after=lambda e: playNext(ctx))
-        voice.is_playing()
-    else:
-        songQueue[ctx.guild].append(song)
-        musicTitles[ctx.guild].append(file)
-        await edit_message(ctx)
+        if not voice.is_playing():
+            songQueue[ctx.guild] = [song]
+            musicTitles[ctx.guild] = [file]
+            message[ctx.guild] = await ctx.send(embed=song["embed"])
+            voice.play(discord.FFmpegPCMAudio(executable=ffmpegPath, source=file), after=lambda e: playNext(ctx))
+            voice.is_playing()
+        else:
+            songQueue[ctx.guild].append(song)
+            musicTitles[ctx.guild].append(file)
+            await edit_message(ctx)
+    except discord.ext.commands.errors.CommandInvokeError:
+        await ctx.send("You're not connected to the voice channel", delete_after=5)
 
 
 @bot.command(pass_context=True, aliases=["REPEAT", "r", "R", "omt", "OMT", "again", "AGAIN", "replay", "REPLAY"])
 async def repeat(ctx):
     global repeat
 
-    channel = ctx.message.author.voice.channel
-    voice = get(bot.voice_clients, guild=ctx.guild)
-    await ctx.channel.purge(limit=1)
+    try:
+        channel = ctx.message.author.voice.channel
+        voice = get(bot.voice_clients, guild=ctx.guild)
+        await ctx.channel.purge(limit=1)
 
-    repeat = True
+        repeat = True
 
-    if voice and voice.is_connected():
-        await voice.move_to(channel)
-    else:
-        voice = await channel.connect
+        if voice and voice.is_connected():
+            await voice.move_to(channel)
+        else:
+            voice = await channel.connect
 
-    if voice.is_playing():
-        voice.stop()
-    else:
-        ctx.send("Nothing to repeat", delete_after=5)
-
-    await edit_message(ctx)
+        if voice.is_playing():
+            voice.stop()
+        else:
+            ctx.send("Nothing to repeat", delete_after=5)
+        await ctx.send("Repeat requested by: {}".format(ctx.message.author.voice.channel), delete_after=5)
+        await edit_message(ctx)
+    except discord.ext.commands.errors.CommandInvokeError:
+        await ctx.send("You're not connected to the voice channel", delete_after=5)
 
 
 @bot.command(pass_context=True, aliases=["stop", "STOP", "s", "S"])
 async def pause(ctx):
     voice = get(bot.voice_clients, guild=ctx.guild)
-    if voice.is_connected():
-        await ctx.channel.purge(limit=1)
-        if voice.is_playing():
-            await ctx.send("Music paused", delete_after=5)
-            voice.pause()
-        else:
-            await ctx.send("Music resumed", delete_after=5)
-            voice.resume()
+    try:
+        if voice.is_connected():
+            await ctx.channel.purge(limit=1)
+            if voice.is_playing():
+                await ctx.send("Music paused", delete_after=5)
+                voice.pause()
+            else:
+                await ctx.send("Music resumed", delete_after=5)
+                voice.resume()
+    except discord.ext.commands.errors.CommandInvokeError:
+        await ctx.send("You're not connected to the voice channel", delete_after=5)
 
 
 @bot.command(pass_context=True)
@@ -232,15 +244,33 @@ async def help(ctx):
 @bot.command(pass_context=True)
 async def skip(ctx):
     voice = get(bot.voice_clients, guild=ctx.guild)
-    if voice.is_playing():
-        await ctx.channel.purge(limit=1)
-        await ctx.send("Music skipped", delete_after=5)
-        voice.stop()
+    try:
+        if voice.is_playing():
+            await ctx.channel.purge(limit=1)
+            await ctx.send("Music skipped", delete_after=5)
+            voice.stop()
+    except discord.ext.commands.errors.CommandInvokeError:
+        await ctx.send("You're not connected to the voice channel", delete_after=5)
 
 
 @bot.command(pass_context=True)
 async def users(ctx):
-    await ctx.send(ctx.member_count)
+    await ctx.send("Number of users on server: {}".format(ctx.guild.member_count))
+
+
+@bot.command(pass_context=True, aliases=["QUEUE", "q", "Q"])
+async def queue(ctx):
+    try:
+        playing = songQueue[ctx.guild][0]["title"]
+        content = "\n".join([f"{songQueue[ctx.guild].index(i)}: {i['title']}" for i in songQueue[ctx.guild][1:]]) \
+            if len(songQueue[ctx.guild]) > 1 else "No song queued"
+
+        embed = discord.Embed(title="Music queue", color=discord.Color.purple())\
+            .add_field(name="Playing now: ", value=playing, inline=False)\
+            .add_field(name="Queued: ", value=content)
+        await message[ctx.guild].edit(embed=embed)
+    except discord.ext.commands.errors.CommandInvokeError:
+        await ctx.send("You're not connected to the voice channel", delete_after=5)
 
 
 @bot.event
