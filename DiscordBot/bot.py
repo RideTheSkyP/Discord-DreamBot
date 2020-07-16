@@ -11,9 +11,16 @@ from discord.utils import get
 joined, messages, guildId, songQueue, message, musicTitles, repeat, i = 0, 0, 0, {}, {}, {}, False, 0
 token = open("token.txt", "r").read()
 
+# todo remove global repeat
+# todo download songs one by one
+# todo add playlists
+# todo loop
+# todo settings
+# todo set pause timer in settings
 bot = commands.Bot(command_prefix=".")
 bot.remove_command("help")
 musicPath = "data/audio/cache/"
+playlistPath = "data/audio/playlist/"
 ffmpegPath = ""
 
 # check what happen if remove socket timeout
@@ -76,14 +83,14 @@ async def join(ctx):
     await ctx.send("Joined {}".format(channel), delete_after=5)
 
 
-@bot.command(pass_context=True)
+@bot.command(pass_context=True, aliases=["LEAVE", "l", "L"])
 async def leave(ctx):
     channel = ctx.message.author.voice.channel
     voice = get(ctx.bot.voice_clients)
 
     if voice and voice.is_connected():
-        deleteFiles()
         await voice.disconnect()
+        deleteFiles()
         await ctx.send("Left {}".format(channel), delete_after=5)
 
 
@@ -95,22 +102,23 @@ def parse_duration(duration):
 
 async def edit_message(ctx):
     embed = songQueue[ctx.guild][0]["embed"]
-    content = "\n".join([f"({songQueue[ctx.guild].index(i)}) {i['title']}" for i in songQueue[ctx.guild][1:]]) \
-        if len(songQueue[ctx.guild]) > 1 else "No song queued"
+    print(songQueue[ctx.guild])
+    content = "\n".join([f"{songQueue[ctx.guild].index(i)}:        "
+                         f"[{i['title']}]({i['webpage_url']})" for i in songQueue[ctx.guild][1:]]) \
+        if len(songQueue[ctx.guild]) > 1 else "No songs are queued"
     embed.set_field_at(index=3, name="Queue: ", value=content, inline=False)
     await message[ctx.guild].edit(embed=embed)
 
 
-def search(author, arg):
+def search(author, url):
     global i
-
     with youtube_dl.YoutubeDL(ydlOptions) as ydl:
         try:
-            requests.get(arg)
+            requests.get(url)
         except:
-            info = ydl.extract_info(f"ytsearch:{arg}", download=True)["entries"][0]
+            info = ydl.extract_info(f"ytsearch:{url}", download=True)["entries"][0]
         else:
-            info = ydl.extract_info(arg, download=True)
+            info = ydl.extract_info(url, download=True)
 
         filename = ydl.prepare_filename(info)
         i += 1
@@ -123,8 +131,8 @@ def search(author, arg):
                 os.remove(os.path.join(musicPath + filename))
             else:
                 pass
-        except Exception as e:
-            print(e)
+        except Exception:
+            pass
 
         embed = (discord.Embed(title="Currently playing: ", description=f"[{info['title']}]({info['webpage_url']})",
                                color=discord.Color.purple())
@@ -134,17 +142,19 @@ def search(author, arg):
                  .add_field(name="Queue", value="No song queued")
                  .set_thumbnail(url=info["thumbnail"]))
 
-        return {"embed": embed, "source": info["formats"][0]["url"], "title": info["title"]}, f
+        return {"embed": embed, "source": info["formats"][0]["url"], "title": info["title"],
+                "webpage_url": info['webpage_url']}, f
 
 
 def playNext(ctx):
     voice = get(bot.voice_clients, guild=ctx.guild)
     global repeat
-
     song = musicTitles[ctx.guild][0]
+
     if not repeat:
         del songQueue[ctx.guild][0], musicTitles[ctx.guild][0]
         os.remove(song)
+        repeat = False
     else:
         repeat = False
 
@@ -153,6 +163,7 @@ def playNext(ctx):
         voice.play(discord.FFmpegPCMAudio(executable=ffmpegPath, source=musicTitles[ctx.guild][0]),
                    after=lambda e: playNext(ctx))
         voice.is_playing()
+        repeat = False
     else:
         asyncio.run_coroutine_threadsafe(voice.disconnect(), bot.loop)
         asyncio.run_coroutine_threadsafe(message[ctx.guild].delete(), bot.loop)
@@ -161,7 +172,7 @@ def playNext(ctx):
 
 
 @bot.command(pass_context=True, aliases=["p", "PLAY", "P"])
-async def play(ctx, video: str):
+async def play(ctx, *video: str):
     try:
         channel = ctx.message.author.voice.channel
         voice = get(bot.voice_clients, guild=ctx.guild)
@@ -183,9 +194,11 @@ async def play(ctx, video: str):
             songQueue[ctx.guild].append(song)
             musicTitles[ctx.guild].append(file)
             await edit_message(ctx)
-    except Exception:
+    except Exception as e:
+        print("exce")
         await ctx.channel.purge(limit=1)
-        await ctx.send("You're not connected to the voice channel", delete_after=5)
+        await ctx.send("You're not connected to the voice channel or the video you requested isn't supported by player",
+                       delete_after=5)
 
 
 @bot.command(pass_context=True, aliases=["REPEAT", "r", "R", "again", "AGAIN", "replay", "REPLAY"])
@@ -208,16 +221,19 @@ async def repeat(ctx):
             voice.stop()
         else:
             ctx.send("Nothing to repeat", delete_after=5)
-        await ctx.send("Repeat requested by: {}".format(ctx.message.author.voice.channel), delete_after=5)
+
+        await ctx.send("Repeat requested by: {}".format(ctx.message.author), delete_after=5)
         await edit_message(ctx)
     except Exception:
         await ctx.channel.purge(limit=1)
         await ctx.send("You're not connected to the voice channel or nothing playing now", delete_after=5)
 
 
-@bot.command(pass_context=True, aliases=["stop", "STOP"])
+@bot.command(pass_context=True, aliases=["PAUSE", "stop", "STOP"])
 async def pause(ctx):
     voice = get(bot.voice_clients, guild=ctx.guild)
+    await ctx.channel.purge(limit=1)
+
     try:
         if voice.is_connected():
             await ctx.channel.purge(limit=1)
@@ -228,56 +244,67 @@ async def pause(ctx):
                 await ctx.send("Music resumed", delete_after=5)
                 voice.resume()
     except Exception:
-        await ctx.channel.purge(limit=1)
         await ctx.send("You're not connected to the voice channel or nothing playing now", delete_after=5)
 
 
-@bot.command(pass_context=True)
-async def hello(ctx):
-    await ctx.send("Hi {}".format(ctx.author))
+@bot.command(pass_context=True, aliases=["SKIP", "s", "S"])
+async def skip(ctx):
+    global repeat
+    repeat = False
+    voice = get(bot.voice_clients, guild=ctx.guild)
+
+    try:
+        if voice.is_playing():
+            await ctx.channel.purge(limit=1)
+            await ctx.send("Track skipped", delete_after=5)
+            voice.stop()
+    except Exception:
+        await ctx.channel.purge(limit=1)
+        await ctx.send("You're not connected to the voice channel or queue is empty", delete_after=5)
 
 
 @bot.command(pass_context=True, aliases=["HELP", "h", "H"])
 async def help(ctx):
-    embed = discord.Embed(title="Help", description="Commands")\
-        .add_field(name=".hello", value="Greets the user")\
-        .add_field(name=".users", value="Prints number of users")\
-        .add_field(name=".join", value="Bot will join voice channel")\
-        .add_field(name=".leave", value="Bot will leave voice channel")\
-        .add_field(name=".play", value="Request music with url or song title")\
-        .add_field(name=".skip", value="Play next track")\
-        .add_field(name=".replay", value="Repeat the track")\
-        .add_field(name=".pause", value="Pause music")\
-        .add_field(name=".queue", value="Shows queue")\
-        .add_field(name=".extendedhelp ,  .aliases", value="Shows all aliases and some useful information")\
-        .add_field(name="Some information", value="You can ignore and use bot with enabled CAPS LOCK")
+    await ctx.channel.purge(limit=1)
+    embed = discord.Embed(title="Help", description="Commands", color=discord.Color.purple())\
+        .add_field(name=".hello", value="Greets the user", inline=True)\
+        .add_field(name=".users", value="Prints number of users", inline=True)\
+        .add_field(name=".join", value="Bot will join voice channel", inline=True)\
+        .add_field(name=".leave", value="Bot will leave voice channel", inline=False)\
+        .add_field(name=".play", value="Request music with url or song title", inline=False)\
+        .add_field(name=".skip", value="Play next track", inline=True)\
+        .add_field(name=".replay", value="Repeat the track", inline=True)\
+        .add_field(name=".pause", value="Pause music", inline=True)\
+        .add_field(name=".queue", value="Shows queue", inline=False)\
+        .add_field(name=".extendedhelp\t\t\t.aliases", value="Shows all aliases and some useful information",
+                   inline=True)\
+        .add_field(name="CAPS LOCK", value="You can ignore register and use bot with enabled CAPS LOCK", inline=False)\
+        .add_field(name="Playlists", value="Playlist are disabled, if you want to enable them, type .settings",
+                   inline=True)
     await ctx.send(embed=embed)
 
 
 @bot.command(pass_context=True, aliases=["EXTENDEDHELP", "eh", "Eh", "aliases", "ALIASES"])
 async def extendedhelp(ctx):
+    await ctx.channel.purge(limit=1)
     embed = discord.Embed(title="Help", description="Extended help commands and aliases", color=discord.Color.purple())\
-        .add_field(name=".play", value="aliases['.PLAY', '.p', '.P']")\
-        .add_field(name=".pause", value="aliases['.stop', '.STOP']")\
-        .add_field(name=".help", value="aliases['.HELP', '.h', '.H']")\
-        .add_field(name=".repeat", value="aliases['.REPEAT', '.r', '.R', '.again', '.AGAIN', '.replay', '.REPLAY']") \
-        .add_field(name=".skip", value="aliases['.SKIP', '.s', '.S'")\
-        .add_field(name=".extendedhelp", value="aliases['.EXTENDEDHELP', '.eh', '.EH', '.aliases', '.ALIASES']")\
-        .add_field(name="Issues", value="If bot stacked at voice channel use command .leave it will clear cache")
+        .add_field(name=".play", value="Aliases are '.PLAY', '.p', '.P'", inline=False)\
+        .add_field(name=".pause", value="Aliases are'PAUSE', '.stop', '.STOP'", inline=False)\
+        .add_field(name=".help", value="Aliases are'.HELP', '.h', '.H'", inline=False)\
+        .add_field(name=".repeat", value="Aliases are '.REPEAT', '.r', '.R', '.again', '.AGAIN', '.replay', '.REPLAY'",
+                   inline=False) \
+        .add_field(name=".skip", value="Aliases are '.SKIP', '.s', '.S'", inline=False)\
+        .add_field(name=".extendedhelp", value="Aliases are'.EXTENDEDHELP', '.eh', '.EH', '.aliases', '.ALIASES'",
+                   inline=False)\
+        .add_field(name="Issues", value="If bot stacked at voice channel use command '.leave' it will clear cache also "
+                                        "you can disconnect him from voice chat and then test with '.join' command",
+                   inline=False)
     await ctx.send(embed=embed)
 
 
-@bot.command(pass_context=True, aliases=["SKIP", "s", "S"])
-async def skip(ctx):
-    voice = get(bot.voice_clients, guild=ctx.guild)
-    try:
-        if voice.is_playing():
-            await ctx.channel.purge(limit=1)
-            await ctx.send("Music skipped", delete_after=5)
-            voice.stop()
-    except Exception:
-        await ctx.channel.purge(limit=1)
-        await ctx.send("You're not connected to the voice channel or queue is empty", delete_after=5)
+@bot.command(pass_context=True)
+async def hello(ctx):
+    await ctx.send("Hi {}".format(ctx.author))
 
 
 @bot.command(pass_context=True)
@@ -287,6 +314,7 @@ async def users(ctx):
 
 @bot.command(pass_context=True, aliases=["QUEUE", "q", "Q"])
 async def queue(ctx):
+    await ctx.channel.purge(limit=1)
     try:
         playing = songQueue[ctx.guild][0]["title"]
         content = "\n".join([f"{songQueue[ctx.guild].index(i)}: {i['title']}" for i in songQueue[ctx.guild][1:]]) \
@@ -297,7 +325,6 @@ async def queue(ctx):
             .add_field(name="Queued: ", value=content)
         await message[ctx.guild].edit(embed=embed)
     except Exception:
-        await ctx.channel.purge(limit=1)
         await ctx.send("You're not connected to the voice channel or queue is empty", delete_after=5)
 
 
@@ -308,6 +335,9 @@ async def on_ready():
     invite_link = discord.utils.oauth_url(bot.user, permissions=perms)
     print(f"Use this link to add the bot to your server: {invite_link}")
     deleteFiles()
+
+    activity = discord.Game(name=".help", type=2)
+    await bot.change_presence(activity=activity)
 
     for guild in bot.guilds:
         print("{} is connected to the following guild: {}. Guild id: {}".format(bot.user, guild.name, guild.id))
