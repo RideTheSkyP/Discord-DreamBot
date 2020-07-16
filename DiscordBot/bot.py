@@ -18,7 +18,7 @@ commandPrefix = "."
 bot = commands.Bot(command_prefix=commandPrefix)
 bot.remove_command("help")
 musicPath = "data/audio/cache/"
-playlistPath = "data/audio/playlist/"
+ffmpegPath = ""
 
 # add to ydlOptions "extract_flat": True and "simulate": True (for extracting information)
 ydlOptions = {
@@ -360,6 +360,50 @@ async def extendedhelp(ctx):
         .add_field(name="Issues", value=f'If bot stacked at voice channel use command "**{commandPrefix}leave**" it '
                                         f'will clear cache also you can disconnect him from voice chat and then test '
                                         f'with "**{commandPrefix}join**" command', inline=False)
+    await ctx.send(embed=embed)
+
+
+@bot.command(pass_context=True)
+async def hello(ctx):
+    await ctx.send("Hi {}".format(ctx.author))
+
+
+@bot.command(pass_context=True, aliases=["HELP", "h", "H"])
+async def help(ctx):
+    await ctx.channel.purge(limit=1)
+    embed = discord.Embed(title="Help", description="Commands", color=discord.Color.purple())\
+        .add_field(name=".hello", value="Greets the user", inline=True)\
+        .add_field(name=".users", value="Prints number of users", inline=True)\
+        .add_field(name=".join", value="Bot will join voice channel", inline=True)\
+        .add_field(name=".leave", value="Bot will leave voice channel", inline=False)\
+        .add_field(name=".play", value="Request music with url or song title", inline=False)\
+        .add_field(name=".skip", value="Play next track", inline=True)\
+        .add_field(name=".replay", value="Repeat the track", inline=True)\
+        .add_field(name=".pause", value="Pause music", inline=True)\
+        .add_field(name=".queue", value="Shows queue", inline=False)\
+        .add_field(name=".extendedhelp\t\t\t.aliases", value="Shows all aliases and some useful information",
+                   inline=True)\
+        .add_field(name="CAPS LOCK", value="You can ignore register and use bot with enabled CAPS LOCK", inline=False)\
+        .add_field(name="Playlists", value="Playlist are disabled, if you want to enable them, type .settings",
+                   inline=True)
+    await ctx.send(embed=embed)
+
+
+@bot.command(pass_context=True, aliases=["EXTENDEDHELP", "eh", "Eh", "aliases", "ALIASES"])
+async def extendedhelp(ctx):
+    await ctx.channel.purge(limit=1)
+    embed = discord.Embed(title="Help", description="Extended help commands and aliases", color=discord.Color.purple())\
+        .add_field(name=".play", value="Aliases are '.PLAY', '.p', '.P'", inline=False)\
+        .add_field(name=".pause", value="Aliases are'PAUSE', '.stop', '.STOP'", inline=False)\
+        .add_field(name=".help", value="Aliases are'.HELP', '.h', '.H'", inline=False)\
+        .add_field(name=".repeat", value="Aliases are '.REPEAT', '.r', '.R', '.again', '.AGAIN', '.replay', '.REPLAY'",
+                   inline=False) \
+        .add_field(name=".skip", value="Aliases are '.SKIP', '.s', '.S'", inline=False)\
+        .add_field(name=".extendedhelp", value="Aliases are'.EXTENDEDHELP', '.eh', '.EH', '.aliases', '.ALIASES'",
+                   inline=False)\
+        .add_field(name="Issues", value="If bot stacked at voice channel use command '.leave' it will clear cache also "
+                                        "you can disconnect him from voice chat and then test with '.join' command",
+                   inline=False)
     await ctx.send(embed=embed)
 
 
