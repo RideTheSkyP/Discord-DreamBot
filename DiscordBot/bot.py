@@ -80,6 +80,7 @@ async def join(ctx):
 async def leave(ctx):
     channel = ctx.message.author.voice.channel
     voice = get(ctx.bot.voice_clients)
+
     if voice and voice.is_connected():
         deleteFiles()
         await voice.disconnect()
@@ -182,11 +183,12 @@ async def play(ctx, video: str):
             songQueue[ctx.guild].append(song)
             musicTitles[ctx.guild].append(file)
             await edit_message(ctx)
-    except discord.ext.commands.errors.CommandInvokeError:
+    except Exception:
+        await ctx.channel.purge(limit=1)
         await ctx.send("You're not connected to the voice channel", delete_after=5)
 
 
-@bot.command(pass_context=True, aliases=["REPEAT", "r", "R", "omt", "OMT", "again", "AGAIN", "replay", "REPLAY"])
+@bot.command(pass_context=True, aliases=["REPEAT", "r", "R", "again", "AGAIN", "replay", "REPLAY"])
 async def repeat(ctx):
     global repeat
 
@@ -208,11 +210,12 @@ async def repeat(ctx):
             ctx.send("Nothing to repeat", delete_after=5)
         await ctx.send("Repeat requested by: {}".format(ctx.message.author.voice.channel), delete_after=5)
         await edit_message(ctx)
-    except discord.ext.commands.errors.CommandInvokeError:
-        await ctx.send("You're not connected to the voice channel", delete_after=5)
+    except Exception:
+        await ctx.channel.purge(limit=1)
+        await ctx.send("You're not connected to the voice channel or nothing playing now", delete_after=5)
 
 
-@bot.command(pass_context=True, aliases=["stop", "STOP", "s", "S"])
+@bot.command(pass_context=True, aliases=["stop", "STOP"])
 async def pause(ctx):
     voice = get(bot.voice_clients, guild=ctx.guild)
     try:
@@ -224,8 +227,9 @@ async def pause(ctx):
             else:
                 await ctx.send("Music resumed", delete_after=5)
                 voice.resume()
-    except discord.ext.commands.errors.CommandInvokeError:
-        await ctx.send("You're not connected to the voice channel", delete_after=5)
+    except Exception:
+        await ctx.channel.purge(limit=1)
+        await ctx.send("You're not connected to the voice channel or nothing playing now", delete_after=5)
 
 
 @bot.command(pass_context=True)
@@ -233,15 +237,37 @@ async def hello(ctx):
     await ctx.send("Hi {}".format(ctx.author))
 
 
-@bot.command(pass_context=True)
+@bot.command(pass_context=True, aliases=["HELP", "h", "H"])
 async def help(ctx):
-    embed = discord.Embed(title="Help", description="Commands")
-    embed.add_field(name="!hello", value="Greets the user")
-    embed.add_field(name="!users", value="Prints number of users")
+    embed = discord.Embed(title="Help", description="Commands")\
+        .add_field(name=".hello", value="Greets the user")\
+        .add_field(name=".users", value="Prints number of users")\
+        .add_field(name=".join", value="Bot will join voice channel")\
+        .add_field(name=".leave", value="Bot will leave voice channel")\
+        .add_field(name=".play", value="Request music with url or song title")\
+        .add_field(name=".skip", value="Play next track")\
+        .add_field(name=".replay", value="Repeat the track")\
+        .add_field(name=".pause", value="Pause music")\
+        .add_field(name=".queue", value="Shows queue")\
+        .add_field(name=".extendedhelp ,  .aliases", value="Shows all aliases and some useful information")\
+        .add_field(name="Some information", value="You can ignore and use bot with enabled CAPS LOCK")
     await ctx.send(embed=embed)
 
 
-@bot.command(pass_context=True)
+@bot.command(pass_context=True, aliases=["EXTENDEDHELP", "eh", "Eh", "aliases", "ALIASES"])
+async def extendedhelp(ctx):
+    embed = discord.Embed(title="Help", description="Extended help commands and aliases", color=discord.Color.purple())\
+        .add_field(name=".play", value="aliases['.PLAY', '.p', '.P']")\
+        .add_field(name=".pause", value="aliases['.stop', '.STOP']")\
+        .add_field(name=".help", value="aliases['.HELP', '.h', '.H']")\
+        .add_field(name=".repeat", value="aliases['.REPEAT', '.r', '.R', '.again', '.AGAIN', '.replay', '.REPLAY']") \
+        .add_field(name=".skip", value="aliases['.SKIP', '.s', '.S'")\
+        .add_field(name=".extendedhelp", value="aliases['.EXTENDEDHELP', '.eh', '.EH', '.aliases', '.ALIASES']")\
+        .add_field(name="Issues", value="If bot stacked at voice channel use command .leave it will clear cache")
+    await ctx.send(embed=embed)
+
+
+@bot.command(pass_context=True, aliases=["SKIP", "s", "S"])
 async def skip(ctx):
     voice = get(bot.voice_clients, guild=ctx.guild)
     try:
@@ -249,8 +275,9 @@ async def skip(ctx):
             await ctx.channel.purge(limit=1)
             await ctx.send("Music skipped", delete_after=5)
             voice.stop()
-    except discord.ext.commands.errors.CommandInvokeError:
-        await ctx.send("You're not connected to the voice channel", delete_after=5)
+    except Exception:
+        await ctx.channel.purge(limit=1)
+        await ctx.send("You're not connected to the voice channel or queue is empty", delete_after=5)
 
 
 @bot.command(pass_context=True)
@@ -269,8 +296,9 @@ async def queue(ctx):
             .add_field(name="Playing now: ", value=playing, inline=False)\
             .add_field(name="Queued: ", value=content)
         await message[ctx.guild].edit(embed=embed)
-    except discord.ext.commands.errors.CommandInvokeError:
-        await ctx.send("You're not connected to the voice channel", delete_after=5)
+    except Exception:
+        await ctx.channel.purge(limit=1)
+        await ctx.send("You're not connected to the voice channel or queue is empty", delete_after=5)
 
 
 @bot.event
@@ -282,7 +310,7 @@ async def on_ready():
     deleteFiles()
 
     for guild in bot.guilds:
-        print("{} is connected to the following guild: {}.Guild id: {}".format(bot.user, guild.name, guild.id))
+        print("{} is connected to the following guild: {}. Guild id: {}".format(bot.user, guild.name, guild.id))
 
 
 # # todo join, rejoin, wait after everyone leaves, leave after no one mentions for some time || task ended
