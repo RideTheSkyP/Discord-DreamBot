@@ -393,12 +393,12 @@ async def help(ctx):
 async def extendedhelp(ctx):
     await ctx.channel.purge(limit=1)
     embed = discord.Embed(title="Help", description="Extended help commands and aliases", color=discord.Color.purple())\
-        .add_field(name=".play", value="Aliases are '.PLAY', '.p', '.P'", inline=False)\
-        .add_field(name=".pause", value="Aliases are'PAUSE', '.stop', '.STOP'", inline=False)\
-        .add_field(name=".help", value="Aliases are'.HELP', '.h', '.H'", inline=False)\
-        .add_field(name=".repeat", value="Aliases are '.REPEAT', '.r', '.R', '.again', '.AGAIN', '.replay', '.REPLAY'",
+        .add_field(name=".play", value="Aliases are: '.PLAY', '.p', '.P'", inline=False)\
+        .add_field(name=".pause", value="Aliases are: 'PAUSE', '.stop', '.STOP'", inline=False)\
+        .add_field(name=".help", value="Aliases are: '.HELP', '.h', '.H'", inline=False)\
+        .add_field(name=".repeat", value="Aliases are: '.REPEAT', '.r', '.R', '.again', '.AGAIN', '.replay', '.REPLAY'",
                    inline=False) \
-        .add_field(name=".skip", value="Aliases are '.SKIP', '.s', '.S'", inline=False)\
+        .add_field(name=".skip", value="Aliases are: '.SKIP', '.s', '.S'", inline=False)\
         .add_field(name=".extendedhelp", value="Aliases are'.EXTENDEDHELP', '.eh', '.EH', '.aliases', '.ALIASES'",
                    inline=False)\
         .add_field(name="Issues", value="If bot stacked at voice channel use command '.leave' it will clear cache also "
