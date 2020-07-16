@@ -8,15 +8,17 @@ import requests
 from discord.ext import commands
 from discord.utils import get
 
-joined, messages, guildId, songQueue, message, musicTitles, repeat, i = 0, 0, 0, {}, {}, {}, False, 0
+joined, messages, guildId, songQueue, musicTitles, message, songIterator = 0, 0, 0, {}, {}, {}, 0
 token = open("token.txt", "r").read()
 
-# todo remove global repeat
-# todo download songs one by one
+# todo remove global repeat, redo repeat (done)
+# todo download songs one by one (done)
 # todo add playlists
 # todo loop
 # todo settings
 # todo set pause timer in settings
+# What's better repeat or replay ???
+# Add images to embed queue ???
 bot = commands.Bot(command_prefix=".")
 bot.remove_command("help")
 musicPath = "data/audio/cache/"
@@ -102,8 +104,7 @@ def parse_duration(duration):
 
 async def edit_message(ctx):
     embed = songQueue[ctx.guild][0]["embed"]
-    print(songQueue[ctx.guild])
-    content = "\n".join([f"{songQueue[ctx.guild].index(i)}:        "
+    content = "\n".join([f"{songQueue[ctx.guild].index(i)}: "
                          f"[{i['title']}]({i['webpage_url']})" for i in songQueue[ctx.guild][1:]]) \
         if len(songQueue[ctx.guild]) > 1 else "No songs are queued"
     embed.set_field_at(index=3, name="Queue: ", value=content, inline=False)
@@ -111,28 +112,13 @@ async def edit_message(ctx):
 
 
 def search(author, url):
-    global i
     with youtube_dl.YoutubeDL(ydlOptions) as ydl:
         try:
             requests.get(url)
         except:
-            info = ydl.extract_info(f"ytsearch:{url}", download=True)["entries"][0]
+            info = ydl.extract_info(f"ytsearch:{url}", download=False)["entries"][0]
         else:
-            info = ydl.extract_info(url, download=True)
-
-        filename = ydl.prepare_filename(info)
-        i += 1
-        songTitle = os.path.splitext(filename)[0]
-        os.rename(songTitle + ".mp3", songTitle + f"{i}.mp3")
-        f = os.path.join(songTitle + f"{i}.mp3")
-
-        try:
-            if os.path.exists(os.path.join(musicPath + filename)):
-                os.remove(os.path.join(musicPath + filename))
-            else:
-                pass
-        except Exception:
-            pass
+            info = ydl.extract_info(url, download=False)
 
         embed = (discord.Embed(title="Currently playing: ", description=f"[{info['title']}]({info['webpage_url']})",
                                color=discord.Color.purple())
@@ -143,32 +129,51 @@ def search(author, url):
                  .set_thumbnail(url=info["thumbnail"]))
 
         return {"embed": embed, "source": info["formats"][0]["url"], "title": info["title"],
-                "webpage_url": info['webpage_url']}, f
+                "webpage_url": info['webpage_url']}
 
 
-def playNext(ctx):
+def playNext(ctx, played):
     voice = get(bot.voice_clients, guild=ctx.guild)
-    global repeat
-    song = musicTitles[ctx.guild][0]
-
-    if not repeat:
-        del songQueue[ctx.guild][0], musicTitles[ctx.guild][0]
-        os.remove(song)
-        repeat = False
-    else:
-        repeat = False
+    video = musicTitles[ctx.guild][0]
+    del songQueue[ctx.guild][0], musicTitles[ctx.guild][0]
+    os.remove(played)
 
     if len(songQueue[ctx.guild]) > 0 and len(musicTitles[ctx.guild]) > 0:
+        song = download(video)
         asyncio.run_coroutine_threadsafe(edit_message(ctx), bot.loop)
-        voice.play(discord.FFmpegPCMAudio(executable=ffmpegPath, source=musicTitles[ctx.guild][0]),
-                   after=lambda e: playNext(ctx))
+        voice.play(discord.FFmpegPCMAudio(executable=ffmpegPath, source=song),
+                   after=lambda e: playNext(ctx, song))
         voice.is_playing()
-        repeat = False
     else:
         asyncio.run_coroutine_threadsafe(voice.disconnect(), bot.loop)
         asyncio.run_coroutine_threadsafe(message[ctx.guild].delete(), bot.loop)
         deleteFiles()
-        repeat = False
+
+
+def download(url):
+    global songIterator
+    with youtube_dl.YoutubeDL(ydlOptions) as ydl:
+        try:
+            requests.get(url)
+        except:
+            info = ydl.extract_info(f"ytsearch:{url}", download=True)["entries"][0]
+        else:
+            info = ydl.extract_info(url, download=True)
+
+        filename = ydl.prepare_filename(info)
+        songIterator += 1
+        songTitle = os.path.splitext(filename)[0]
+        os.rename(songTitle + ".mp3", songTitle + f"{songIterator}.mp3")
+        file = os.path.join(songTitle + f"{songIterator}.mp3")
+
+        try:
+            if os.path.exists(os.path.join(musicPath + filename)):
+                os.remove(os.path.join(musicPath + filename))
+            else:
+                pass
+        except Exception:
+            pass
+    return file
 
 
 @bot.command(pass_context=True, aliases=["p", "PLAY", "P"])
@@ -176,7 +181,7 @@ async def play(ctx, *video: str):
     try:
         channel = ctx.message.author.voice.channel
         voice = get(bot.voice_clients, guild=ctx.guild)
-        song, file = search(ctx.author.mention, video)
+        song = search(ctx.author.mention, video)
         await ctx.channel.purge(limit=1)
 
         if voice and voice.is_connected():
@@ -185,17 +190,18 @@ async def play(ctx, *video: str):
             voice = await channel.connect()
 
         if not voice.is_playing():
+            file = download(video)
             songQueue[ctx.guild] = [song]
-            musicTitles[ctx.guild] = [file]
+            musicTitles[ctx.guild] = [video]
             message[ctx.guild] = await ctx.send(embed=song["embed"])
-            voice.play(discord.FFmpegPCMAudio(executable=ffmpegPath, source=file), after=lambda e: playNext(ctx))
+            voice.play(discord.FFmpegPCMAudio(executable=ffmpegPath, source=file), after=lambda e: playNext(ctx, file))
             voice.is_playing()
         else:
             songQueue[ctx.guild].append(song)
-            musicTitles[ctx.guild].append(file)
+            musicTitles[ctx.guild].append(video)
             await edit_message(ctx)
     except Exception as e:
-        print("exce")
+        print("Play exc:", e)
         await ctx.channel.purge(limit=1)
         await ctx.send("You're not connected to the voice channel or the video you requested isn't supported by player",
                        delete_after=5)
@@ -203,29 +209,27 @@ async def play(ctx, *video: str):
 
 @bot.command(pass_context=True, aliases=["REPEAT", "r", "R", "again", "AGAIN", "replay", "REPLAY"])
 async def repeat(ctx):
-    global repeat
+    channel = ctx.message.author.voice.channel
+    voice = get(bot.voice_clients, guild=ctx.guild)
+    await ctx.channel.purge(limit=1)
 
     try:
-        channel = ctx.message.author.voice.channel
-        voice = get(bot.voice_clients, guild=ctx.guild)
-        await ctx.channel.purge(limit=1)
-
-        repeat = True
-
         if voice and voice.is_connected():
             await voice.move_to(channel)
         else:
             voice = await channel.connect
 
         if voice.is_playing():
+            songQueue[ctx.guild].insert(1, songQueue[ctx.guild][0])
+            musicTitles[ctx.guild].insert(1, musicTitles[ctx.guild][0])
             voice.stop()
         else:
             ctx.send("Nothing to repeat", delete_after=5)
 
         await ctx.send("Repeat requested by: {}".format(ctx.message.author), delete_after=5)
         await edit_message(ctx)
-    except Exception:
-        await ctx.channel.purge(limit=1)
+    except Exception as e:
+        print("Repeat exc:", e)
         await ctx.send("You're not connected to the voice channel or nothing playing now", delete_after=5)
 
 
@@ -249,17 +253,13 @@ async def pause(ctx):
 
 @bot.command(pass_context=True, aliases=["SKIP", "s", "S"])
 async def skip(ctx):
-    global repeat
-    repeat = False
     voice = get(bot.voice_clients, guild=ctx.guild)
-
+    await ctx.channel.purge(limit=1)
     try:
         if voice.is_playing():
-            await ctx.channel.purge(limit=1)
             await ctx.send("Track skipped", delete_after=5)
             voice.stop()
     except Exception:
-        await ctx.channel.purge(limit=1)
         await ctx.send("You're not connected to the voice channel or queue is empty", delete_after=5)
 
 
@@ -288,12 +288,12 @@ async def help(ctx):
 async def extendedhelp(ctx):
     await ctx.channel.purge(limit=1)
     embed = discord.Embed(title="Help", description="Extended help commands and aliases", color=discord.Color.purple())\
-        .add_field(name=".play", value="Aliases are '.PLAY', '.p', '.P'", inline=False)\
-        .add_field(name=".pause", value="Aliases are'PAUSE', '.stop', '.STOP'", inline=False)\
-        .add_field(name=".help", value="Aliases are'.HELP', '.h', '.H'", inline=False)\
-        .add_field(name=".repeat", value="Aliases are '.REPEAT', '.r', '.R', '.again', '.AGAIN', '.replay', '.REPLAY'",
+        .add_field(name=".play", value="Aliases are: '.PLAY', '.p', '.P'", inline=False)\
+        .add_field(name=".pause", value="Aliases are: 'PAUSE', '.stop', '.STOP'", inline=False)\
+        .add_field(name=".help", value="Aliases are: '.HELP', '.h', '.H'", inline=False)\
+        .add_field(name=".repeat", value="Aliases are: '.REPEAT', '.r', '.R', '.again', '.AGAIN', '.replay', '.REPLAY'",
                    inline=False) \
-        .add_field(name=".skip", value="Aliases are '.SKIP', '.s', '.S'", inline=False)\
+        .add_field(name=".skip", value="Aliases are: '.SKIP', '.s', '.S'", inline=False)\
         .add_field(name=".extendedhelp", value="Aliases are'.EXTENDEDHELP', '.eh', '.EH', '.aliases', '.ALIASES'",
                    inline=False)\
         .add_field(name="Issues", value="If bot stacked at voice channel use command '.leave' it will clear cache also "
@@ -315,16 +315,19 @@ async def users(ctx):
 @bot.command(pass_context=True, aliases=["QUEUE", "q", "Q"])
 async def queue(ctx):
     await ctx.channel.purge(limit=1)
+    
     try:
         playing = songQueue[ctx.guild][0]["title"]
         content = "\n".join([f"{songQueue[ctx.guild].index(i)}: {i['title']}" for i in songQueue[ctx.guild][1:]]) \
             if len(songQueue[ctx.guild]) > 1 else "No song queued"
-
+        
         embed = discord.Embed(title="Music queue", color=discord.Color.purple())\
             .add_field(name="Playing now: ", value=playing, inline=False)\
             .add_field(name="Queued: ", value=content)
+        
         await message[ctx.guild].edit(embed=embed)
-    except Exception:
+    except Exception as e:
+        print("Queue exception: ", e)
         await ctx.send("You're not connected to the voice channel or queue is empty", delete_after=5)
 
 
@@ -336,7 +339,7 @@ async def on_ready():
     print(f"Use this link to add the bot to your server: {invite_link}")
     deleteFiles()
 
-    activity = discord.Game(name=".help", type=2)
+    activity = discord.Game(name=".help", type=3)
     await bot.change_presence(activity=activity)
 
     for guild in bot.guilds:
@@ -375,8 +378,10 @@ async def on_member_update(before, after):
 
 
 def deleteFiles():
+    global songIterator
     for files in os.listdir(musicPath):
         os.remove(os.path.join(musicPath + files))
+    songIterator = 0
 
 
 # bot.loop.create_task(update_stats())
