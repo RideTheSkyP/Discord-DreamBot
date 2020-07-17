@@ -8,13 +8,12 @@ import requests
 from discord.ext import commands
 from discord.utils import get
 
-joined, messages, guildId, songQueue, musicTitles, message, songIterator = 0, 0, 0, {}, {}, {}, 0
+joined, messages, guildId, songQueue, musicTitles, message, songIterator, loop = 0, 0, 0, {}, {}, {}, 0, False
 token = open("token.txt", "r").read()
 
-# todo remove global repeat, redo repeat (done)
-# todo download songs one by one (done)
 # todo add playlists
-# todo loop
+# todo loop (done) -> need to avoid global variable loop 
+# todo fix queue (doing now)
 # todo settings
 # todo set pause timer in settings
 # What's better repeat or replay ???
@@ -85,7 +84,7 @@ async def join(ctx):
     await ctx.send("Joined {}".format(channel), delete_after=5)
 
 
-@bot.command(pass_context=True, aliases=["LEAVE", "l", "L"])
+@bot.command(pass_context=True, aliases=["LEAVE"])
 async def leave(ctx):
     channel = ctx.message.author.voice.channel
     voice = get(ctx.bot.voice_clients)
@@ -135,6 +134,14 @@ def search(author, url):
 def playNext(ctx, played):
     voice = get(bot.voice_clients, guild=ctx.guild)
     video = musicTitles[ctx.guild][0]
+
+    if loop is True:
+        songQueue[ctx.guild].append(songQueue[ctx.guild][0])
+        musicTitles[ctx.guild].append(musicTitles[ctx.guild][0])
+        print("SQ", songQueue[ctx.guild], "MT", musicTitles[ctx.guild])
+    else:
+        pass
+
     del songQueue[ctx.guild][0], musicTitles[ctx.guild][0]
     os.remove(played)
 
@@ -173,6 +180,7 @@ def download(url):
                 pass
         except Exception:
             pass
+
     return file
 
 
@@ -233,6 +241,42 @@ async def repeat(ctx):
         await ctx.send("You're not connected to the voice channel or nothing playing now", delete_after=5)
 
 
+# redo this completely
+@bot.command(pass_context=True, aliases=["LOOP", "l", "L"])
+async def loop(ctx):
+    global loop
+    await ctx.channel.purge(limit=1)
+    print(loop)
+
+    if loop is True:
+        loop = False
+    else:
+        loop = True
+
+    print("L", loop)
+    # channel = ctx.message.author.voice.channel
+    # voice = get(bot.voice_clients, guild=ctx.guild)
+    # await ctx.channel.purge(limit=1)
+    #
+    # try:
+    #     if voice and voice.is_connected():
+    #         await voice.move_to(channel)
+    #     else:
+    #         voice = await channel.connect
+    #
+    #     if voice.is_playing():
+    #         songQueue[ctx.guild].insert(-1, songQueue[ctx.guild][0])
+    #         musicTitles[ctx.guild].insert(-1, musicTitles[ctx.guild][0])
+    #     else:
+    #         ctx.send("Nothing to loop")
+    #
+    #     await ctx.send("Loop requested by: {}".format(ctx.message.author), delete_after=5)
+    #     await edit_message(ctx)
+    # except Exception as e:
+    #     print("Loop exception: ", e)
+    #     await ctx.send("You're not connected to the voice channel or nothing playing now")
+
+
 @bot.command(pass_context=True, aliases=["PAUSE", "stop", "STOP"])
 async def pause(ctx):
     voice = get(bot.voice_clients, guild=ctx.guild)
@@ -240,14 +284,14 @@ async def pause(ctx):
 
     try:
         if voice.is_connected():
-            await ctx.channel.purge(limit=1)
             if voice.is_playing():
                 await ctx.send("Music paused", delete_after=5)
                 voice.pause()
             else:
                 await ctx.send("Music resumed", delete_after=5)
                 voice.resume()
-    except Exception:
+    except Exception as e:
+        print("Pause exception", e)
         await ctx.send("You're not connected to the voice channel or nothing playing now", delete_after=5)
 
 
@@ -259,7 +303,8 @@ async def skip(ctx):
         if voice.is_playing():
             await ctx.send("Track skipped", delete_after=5)
             voice.stop()
-    except Exception:
+    except Exception as e:
+        print("Skip exception", e)
         await ctx.send("You're not connected to the voice channel or queue is empty", delete_after=5)
 
 
@@ -292,9 +337,9 @@ async def extendedhelp(ctx):
         .add_field(name=".pause", value="Aliases are: 'PAUSE', '.stop', '.STOP'", inline=False)\
         .add_field(name=".help", value="Aliases are: '.HELP', '.h', '.H'", inline=False)\
         .add_field(name=".repeat", value="Aliases are: '.REPEAT', '.r', '.R', '.again', '.AGAIN', '.replay', '.REPLAY'",
-                   inline=False) \
+                   inline=False)\
         .add_field(name=".skip", value="Aliases are: '.SKIP', '.s', '.S'", inline=False)\
-        .add_field(name=".extendedhelp", value="Aliases are'.EXTENDEDHELP', '.eh', '.EH', '.aliases', '.ALIASES'",
+        .add_field(name=".extendedhelp", value="Aliases are: '.EXTENDEDHELP', '.eh', '.EH', '.aliases', '.ALIASES'",
                    inline=False)\
         .add_field(name="Issues", value="If bot stacked at voice channel use command '.leave' it will clear cache also "
                                         "you can disconnect him from voice chat and then test with '.join' command",
@@ -315,16 +360,16 @@ async def users(ctx):
 @bot.command(pass_context=True, aliases=["QUEUE", "q", "Q"])
 async def queue(ctx):
     await ctx.channel.purge(limit=1)
-    
+
     try:
         playing = songQueue[ctx.guild][0]["title"]
         content = "\n".join([f"{songQueue[ctx.guild].index(i)}: {i['title']}" for i in songQueue[ctx.guild][1:]]) \
             if len(songQueue[ctx.guild]) > 1 else "No song queued"
-        
+
         embed = discord.Embed(title="Music queue", color=discord.Color.purple())\
             .add_field(name="Playing now: ", value=playing, inline=False)\
             .add_field(name="Queued: ", value=content)
-        
+
         await message[ctx.guild].edit(embed=embed)
     except Exception as e:
         print("Queue exception: ", e)
