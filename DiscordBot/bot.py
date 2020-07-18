@@ -8,16 +8,28 @@ import requests
 from discord.ext import commands
 from discord.utils import get
 
-joined, messages, guildId, songQueue, musicTitles, message, songIterator, loop = 0, 0, 0, {}, {}, {}, 0, False
+joined, messages, guildId, songIterator = 0, 0, 0, 0
+loop = False
+songQueue, musicTitles, message = {}, {}, {}
+
 token = open("token.txt", "r").read()
 
 # todo add playlists
-# todo loop (done) -> need to avoid global variable loop 
-# todo fix queue (doing now)
-# todo settings
+# todo add spotify player
+# todo loop (done) -> need to avoid global variable loop
+# todo add images to queues (embed and command) (done)
+# todo add url links to queues (done)
+# todo fix queue (done)
+# todo create resume command (done)
+# todo make all queues like fields (doing now)
+# todo add background image to embed message and queue
+# todo fix url with youtube playlists (currently playing 1st song in playlist, need to play exact one)
+# todo create settings
+# todo set delete time for play command in settings
 # todo set pause timer in settings
+# todo set background image to embed message and queue in settings
+# todo set command_prefix in settings, so need to change all in help, extendedhelp messages
 # What's better repeat or replay ???
-# Add images to embed queue ???
 bot = commands.Bot(command_prefix=".")
 bot.remove_command("help")
 musicPath = "data/audio/cache/"
@@ -55,6 +67,7 @@ ffmpegOptions = {
 
 
 # todo redo with using a database || reading previous messages (preferred to read)
+# add nickname changes tracking
 # async def update_stats():
 #     await bot.wait_until_ready()
 #     global messages, joined
@@ -104,8 +117,9 @@ def parse_duration(duration):
 async def edit_message(ctx):
     embed = songQueue[ctx.guild][0]["embed"]
     content = "\n".join([f"{songQueue[ctx.guild].index(i)}: "
-                         f"[{i['title']}]({i['webpage_url']})" for i in songQueue[ctx.guild][1:]]) \
-        if len(songQueue[ctx.guild]) > 1 else "No songs are queued"
+                         f"[{i['title']}]({i['webpage_url']}) Requested by:{ctx.author.mention} "
+                         f"Duration: {i['duration']}"
+                         for i in songQueue[ctx.guild][1:]]) if len(songQueue[ctx.guild]) > 1 else "No songs are queued"
     embed.set_field_at(index=3, name="Queue: ", value=content, inline=False)
     await message[ctx.guild].edit(embed=embed)
 
@@ -128,7 +142,8 @@ def search(author, url):
                  .set_thumbnail(url=info["thumbnail"]))
 
         return {"embed": embed, "source": info["formats"][0]["url"], "title": info["title"],
-                "webpage_url": info['webpage_url']}
+                "webpage_url": info['webpage_url'], "thumbnail": info["thumbnail"],
+                "duration": parse_duration(info["duration"])}
 
 
 def playNext(ctx, played):
@@ -253,7 +268,6 @@ async def loop(ctx):
     else:
         loop = True
 
-    print("L", loop)
     # channel = ctx.message.author.voice.channel
     # voice = get(bot.voice_clients, guild=ctx.guild)
     # await ctx.channel.purge(limit=1)
@@ -277,7 +291,7 @@ async def loop(ctx):
     #     await ctx.send("You're not connected to the voice channel or nothing playing now")
 
 
-@bot.command(pass_context=True, aliases=["PAUSE", "stop", "STOP"])
+@bot.command(pass_context=True, aliases=["PAUSE", "stop", "STOP", "resume", "RESUME"])
 async def pause(ctx):
     voice = get(bot.voice_clients, guild=ctx.guild)
     await ctx.channel.purge(limit=1)
@@ -362,15 +376,17 @@ async def queue(ctx):
     await ctx.channel.purge(limit=1)
 
     try:
-        playing = songQueue[ctx.guild][0]["title"]
-        content = "\n".join([f"{songQueue[ctx.guild].index(i)}: {i['title']}" for i in songQueue[ctx.guild][1:]]) \
-            if len(songQueue[ctx.guild]) > 1 else "No song queued"
+        playing = f"[{songQueue[ctx.guild][0]['title']}]({songQueue[ctx.guild][0]['webpage_url']})"
+        content = "\n".join([f"{songQueue[ctx.guild].index(i)}: [{i['title']}]({i['webpage_url']}) "
+                             f"Requested by:{ctx.author.mention} Duration: {i['duration']}"
+                             for i in songQueue[ctx.guild][1:]]) if len(songQueue[ctx.guild]) > 1 else "No song queued"
 
-        embed = discord.Embed(title="Music queue", color=discord.Color.purple())\
-            .add_field(name="Playing now: ", value=playing, inline=False)\
-            .add_field(name="Queued: ", value=content)
+        embed = (discord.Embed(title="Music queue", color=discord.Color.purple())
+                 .add_field(name="Playing now: ", value=playing, inline=False)
+                 .add_field(name="Queued: ", value=content)
+                 .set_thumbnail(url=songQueue[ctx.guild][0]["thumbnail"]))
 
-        await message[ctx.guild].edit(embed=embed)
+        await ctx.send(embed=embed)
     except Exception as e:
         print("Queue exception: ", e)
         await ctx.send("You're not connected to the voice channel or queue is empty", delete_after=5)
