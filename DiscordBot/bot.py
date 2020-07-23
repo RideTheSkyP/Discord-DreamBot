@@ -1,5 +1,5 @@
 import discord
-import datetime
+from datetime import datetime
 import asyncio
 import os
 import shutil
@@ -8,7 +8,7 @@ import requests
 from discord.ext import commands
 from discord.utils import get
 
-joined, messages, guildId, songIterator, musicStart = 0, 0, 0, 0, 0
+joined, messages, guildId, songIterator, skipToTime, skipTime, songStartTime = 0, 0, 0, 0, 0, 0, 0
 loop = False
 songQueue, musicTitles, message = {}, {}, {}
 token = open("token.txt", "r").read()
@@ -18,26 +18,25 @@ commandPrefix = "."
 # todo add playlists
 # todo add spotify player
 # todo add volume command
+# todo add "" and font to help and extended help (done)
 # todo make pages in queue
 # todo check if guild still exist (for database solutions)
 # todo fix 404 exception in play (when requesting more then one song together)
-# todo loop (done) -> need to avoid global variable loop 
+# todo loop (done) -> need to avoid global variable loop
 # todo extract direct url to youtube from [query] and link it with music title
-# todo add skip to [time] (done) and skip [time] (doing now) functions
+# todo add skip to [time] (done) and skip [time] (done) functions (done)
 # todo list a youtube playlist with choice indices on play command
 # todo fix url with youtube playlists (currently playing 1st song in playlist, need to play exact one)
 # todo create channel
-# todo create settings
+# todo create settings command
 # todo set delete time for play command in settings
 # todo set pause timer in settings
-# todo set background image to embed message and queue in settings
-# todo set command_prefix in settings, [so need to change all in help, extendedhelp messages (done)]
-# What's better repeat or replay ???
+# todo set color of embed message and queue in settings
+# todo set command_prefix in settings
 bot = commands.Bot(command_prefix=commandPrefix)
 bot.remove_command("help")
 musicPath = "data/audio/cache/"
 playlistPath = "data/audio/playlist/"
-
 
 # check what happen if remove socket timeout
 ydlOptions = {
@@ -65,7 +64,7 @@ ydlOptions = {
 }
 
 ffmpegOptions = {
-    "before_options": f"-ss {musicStart}",
+    "before_options": f"-ss {skipToTime}",
     "options": "-vn"
 }
 
@@ -89,6 +88,7 @@ ffmpegOptions = {
 
 @bot.command(pass_context=True)
 async def join(ctx):
+    await ctx.channel.purge(limit=1)
     channel = ctx.message.author.voice.channel
     voice = get(ctx.bot.voice_clients, guild=ctx.guild)
     deleteFiles()
@@ -103,6 +103,7 @@ async def join(ctx):
 
 @bot.command(pass_context=True, aliases=["LEAVE"])
 async def leave(ctx):
+    await ctx.channel.purge(limit=1)
     channel = ctx.message.author.voice.channel
     voice = get(ctx.bot.voice_clients)
 
@@ -112,7 +113,7 @@ async def leave(ctx):
         await ctx.send("Left {}".format(channel), delete_after=5)
 
 
-def parse_duration(duration):
+def parseDuration(duration):
     m, s = divmod(duration, 60)
     h, m = divmod(m, 60)
     return f"{h:02d}:{m:02d}:{s:02d}"
@@ -143,7 +144,7 @@ def search(author, url):
 
         embed = (discord.Embed(title="Currently playing: ", description=f"[{info['title']}]({info['webpage_url']})",
                                color=discord.Color.purple())
-                 .add_field(name="Duration", value=parse_duration(info["duration"]))
+                 .add_field(name="Duration", value=parseDuration(info["duration"]))
                  .add_field(name="Requested by", value=author)
                  .add_field(name="Uploader", value=f"[{info['uploader']}]({info['channel_url']})")
                  .add_field(name="Queue", value="No song queued")
@@ -151,12 +152,12 @@ def search(author, url):
 
         return {"embed": embed, "source": info["formats"][0]["url"], "title": info["title"],
                 "webpage_url": info['webpage_url'], "thumbnail": info["thumbnail"],
-                "duration": parse_duration(info["duration"])}
+                "duration": parseDuration(info["duration"])}
 
 
 def playNext(ctx, played):
-    global musicStart
-    ffmpegOptions["before_options"] = f"-ss {musicStart}"
+    global skipToTime
+    ffmpegOptions["before_options"] = f"-ss {skipToTime}"
     voice = get(bot.voice_clients, guild=ctx.guild)
     video = musicTitles[ctx.guild][0]
 
@@ -180,7 +181,7 @@ def playNext(ctx, played):
         asyncio.run_coroutine_threadsafe(message[ctx.guild].delete(), bot.loop)
         deleteFiles()
 
-    musicStart = 0
+    skipToTime = 0
 
 
 def download(url):
@@ -204,14 +205,15 @@ def download(url):
                 os.remove(os.path.join(musicPath + filename))
             else:
                 pass
-        except Exception:
-            pass
-
+        except Exception as e:
+            print("Download exception", e)
     return file
 
 
 @bot.command(pass_context=True, aliases=["PLAY", "p", "P"])
 async def play(ctx, *video: str):
+    global songStartTime
+
     try:
         channel = ctx.message.author.voice.channel
         voice = get(bot.voice_clients, guild=ctx.guild)
@@ -228,6 +230,8 @@ async def play(ctx, *video: str):
             songQueue[ctx.guild] = [song]
             musicTitles[ctx.guild] = [video]
             message[ctx.guild] = await ctx.send(embed=song["embed"])
+            songStartTime = datetime.now()
+            print(songStartTime)
             voice.play(discord.FFmpegPCMAudio(executable=ffmpegPath, source=file, **ffmpegOptions),
                        after=lambda e: playNext(ctx, file))
             voice.is_playing()
@@ -237,7 +241,6 @@ async def play(ctx, *video: str):
             await edit_message(ctx)
     except Exception as e:
         print("Play exc:", e)
-        await ctx.channel.purge(limit=1)
         await ctx.send("You're not connected to the voice channel or the video you requested isn't supported by player",
                        delete_after=5)
 
@@ -273,34 +276,11 @@ async def repeat(ctx):
 async def loop(ctx):
     global loop
     await ctx.channel.purge(limit=1)
-    print(loop)
 
     if loop is True:
         loop = False
     else:
         loop = True
-
-    # channel = ctx.message.author.voice.channel
-    # voice = get(bot.voice_clients, guild=ctx.guild)
-    # await ctx.channel.purge(limit=1)
-    #
-    # try:
-    #     if voice and voice.is_connected():
-    #         await voice.move_to(channel)
-    #     else:
-    #         voice = await channel.connect
-    #
-    #     if voice.is_playing():
-    #         songQueue[ctx.guild].insert(-1, songQueue[ctx.guild][0])
-    #         musicTitles[ctx.guild].insert(-1, musicTitles[ctx.guild][0])
-    #     else:
-    #         ctx.send("Nothing to loop")
-    #
-    #     await ctx.send("Loop requested by: {}".format(ctx.message.author), delete_after=5)
-    #     await edit_message(ctx)
-    # except Exception as e:
-    #     print("Loop exception: ", e)
-    #     await ctx.send("You're not connected to the voice channel or nothing playing now")
 
 
 @bot.command(pass_context=True, aliases=["PAUSE", "stop", "STOP", "resume", "RESUME"])
@@ -321,22 +301,45 @@ async def pause(ctx):
         await ctx.send("You're not connected to the voice channel or nothing playing now", delete_after=5)
 
 
+def timeParse(time):
+    try:
+        seconds = 0
+        parts = time.split(":")
+        for i in range(len(parts)):
+            try:
+                seconds += int(parts[-i - 1]) * (60 ** i)
+            except Exception as e:
+                print("timeParse parts to int exception", e)
+        return seconds
+    except Exception as e:
+        print("Time parse exception:", e)
+
+
 @bot.command(pass_context=True, aliases=["SKIP", "s", "S"])
-async def skip(ctx, seconds=0):
+async def skip(ctx, time="0"):
+    endtime = songStartTime - datetime.now()
+    print(abs(int(endtime.total_seconds())))
     voice = get(bot.voice_clients, guild=ctx.guild)
     await ctx.channel.purge(limit=1)
+
     try:
-        if voice.is_playing():
-            await ctx.send("Track skipped", delete_after=5)
-            voice.stop()
-    except Exception as e:
-        print("Skip exception", e)
+        if int(time) is 0:
+            if voice.is_playing():
+                await ctx.send("Track skipped", delete_after=5)
+                voice.stop()
+            else:
+                await ctx.send("Nothing is playing", delete_after=5)
+        elif int(time):
+            raise Exception
+    except:
+        await skipto(ctx, timeParse(time) + abs(int(endtime.total_seconds())))
+    else:
         await ctx.send("You're not connected to the voice channel or queue is empty", delete_after=5)
 
 
 @bot.command(pass_context=True)
-async def skipto(ctx, seconds):
-    global musicStart
+async def skipto(ctx, time):
+    global skipToTime
     channel = ctx.message.author.voice.channel
     voice = get(bot.voice_clients, guild=ctx.guild)
     await ctx.channel.purge(limit=1)
@@ -350,35 +353,36 @@ async def skipto(ctx, seconds):
         if voice.is_playing():
             songQueue[ctx.guild].insert(1, songQueue[ctx.guild][0])
             musicTitles[ctx.guild].insert(1, musicTitles[ctx.guild][0])
-            musicStart = seconds
-            print(musicStart)
+            skipToTime = time
             voice.stop()
         else:
             ctx.send("Nothing to skip", delete_after=5)
 
-        await ctx.send(f"**Skipped to:** {seconds}, Requested by: {ctx.message.author}", delete_after=5)
+        await ctx.send(f"**Skipped to:** {parseDuration(time)}, **Requested by:** {ctx.message.author}", delete_after=5)
         await edit_message(ctx)
     except Exception as e:
         print("Skipto exception:", e)
-        ctx.send("You're not connected to the voice channel or nothing playing now", delete_after=5)
+        await ctx.send("You're not connected to the voice channel or nothing playing now", delete_after=5)
 
 
 @bot.command(pass_context=True, aliases=["HELP", "h", "H"])
 async def help(ctx):
     await ctx.channel.purge(limit=1)
-    embed = discord.Embed(title="Help", description="Commands", color=discord.Color.purple())\
-        .add_field(name=f"{commandPrefix}hello", value="Greets the user", inline=True)\
-        .add_field(name=f"{commandPrefix}users", value="Prints number of users", inline=True)\
-        .add_field(name=f"{commandPrefix}join", value="Bot will join voice channel", inline=True)\
-        .add_field(name=f"{commandPrefix}leave", value="Bot will leave voice channel", inline=False)\
-        .add_field(name=f"{commandPrefix}play", value="Request music with url or song title", inline=False)\
-        .add_field(name=f"{commandPrefix}skip", value="Play next track", inline=True)\
-        .add_field(name=f"{commandPrefix}replay", value="Repeat the track", inline=True)\
-        .add_field(name=f"{commandPrefix}pause", value="Pause music", inline=True)\
-        .add_field(name=f"{commandPrefix}queue", value="Shows queue", inline=False)\
-        .add_field(name=f"{commandPrefix}extendedhelp\t\t\t{commandPrefix}aliases",
-                   value="Shows all aliases and some useful information", inline=True)\
-        .add_field(name="CAPS LOCK", value="You can ignore register and use bot with enabled CAPS LOCK", inline=False)\
+    embed = discord.Embed(title="Help", description="Commands", color=discord.Color.purple()) \
+        .add_field(name=f"*{commandPrefix}hello*", value="Greets the user", inline=True) \
+        .add_field(name=f"*{commandPrefix}users*", value="Prints number of users", inline=True) \
+        .add_field(name=f"*{commandPrefix}join*", value="Bot will join voice channel", inline=True) \
+        .add_field(name=f"*{commandPrefix}leave*", value="Bot will leave voice channel", inline=False) \
+        .add_field(name=f"*{commandPrefix}play*", value="Request music with url or song title", inline=False) \
+        .add_field(name=f"*{commandPrefix}skip*", value="Plays next track", inline=True) \
+        .add_field(name=f"*{commandPrefix}skip 1:20 or 20*", value="Skips next amount of time for 20 skips 20 seconds, "
+                                                                   "for 1:20 skips 1 minute 20 seconds", inline=True) \
+        .add_field(name=f"*{commandPrefix}replay*", value="Repeat the track", inline=True) \
+        .add_field(name=f"*{commandPrefix}pause*", value="Pause music", inline=True) \
+        .add_field(name=f"*{commandPrefix}queue*", value="Shows queue", inline=False) \
+        .add_field(name=f"*{commandPrefix}extendedhelp*\t\t\t*{commandPrefix}aliases*",
+                   value="Shows all aliases and some useful information", inline=True) \
+        .add_field(name="CAPS LOCK", value="You can ignore register and use bot with enabled CAPS LOCK", inline=False) \
         .add_field(name="Playlists",
                    value=f"Playlist are disabled, if you want to enable them, type {commandPrefix}settings",
                    inline=True)
@@ -388,27 +392,30 @@ async def help(ctx):
 @bot.command(pass_context=True, aliases=["EXTENDEDHELP", "eh", "Eh", "aliases", "ALIASES"])
 async def extendedhelp(ctx):
     await ctx.channel.purge(limit=1)
-    embed = discord.Embed(title="Help", description="Extended help commands and aliases", color=discord.Color.purple())\
-        .add_field(name=f"{commandPrefix}play",
-                   value=f"Aliases are: '{commandPrefix}PLAY', '{commandPrefix}p', '{commandPrefix}P'", inline=False)\
-        .add_field(name=f"{commandPrefix}pause",
-                   value=f"Aliases are: '{commandPrefix}PAUSE', '{commandPrefix}stop', '{commandPrefix}STOP'",
-                   inline=False)\
-        .add_field(name=f"{commandPrefix}help",
-                   value=f"Aliases are: '{commandPrefix}HELP', '{commandPrefix}h', '{commandPrefix}H'", inline=False)\
-        .add_field(name=f"{commandPrefix}repeat",
-                   value=f"Aliases are: '{commandPrefix}REPEAT', '{commandPrefix}r', '{commandPrefix}R', "
-                         f"'{commandPrefix}again', '{commandPrefix}AGAIN', '{commandPrefix}replay', "
-                         f"'{commandPrefix}REPLAY'", inline=False)\
-        .add_field(name=f"{commandPrefix}skip",
-                   value=f"Aliases are: '{commandPrefix}SKIP', '{commandPrefix}s', '{commandPrefix}S'", inline=False)\
-        .add_field(name=f"{commandPrefix}extendedhelp",
-                   value=f"Aliases are: '{commandPrefix}EXTENDEDHELP', '{commandPrefix}eh', "
-                         f"'{commandPrefix}EH', '{commandPrefix}aliases', '{commandPrefix}ALIASES'", inline=False)\
-        .add_field(name="Issues", value=f"If bot stacked at voice channel use command '{commandPrefix}leave' it will "
-                                        f"clear cache also you can disconnect him from voice chat and then test with "
-                                        f"'{commandPrefix}join' command",
-                   inline=False)
+    embed = discord.Embed(title="Help", description="Extended help commands and aliases", color=discord.Color.purple()) \
+        .add_field(name=f"*{commandPrefix}play*",
+                   value=f'Aliases are: **"{commandPrefix}PLAY", "{commandPrefix}p", "{commandPrefix}P"**',
+                   inline=False) \
+        .add_field(name=f"*{commandPrefix}pause*",
+                   value=f'Aliases are: **"{commandPrefix}PAUSE", "{commandPrefix}stop", "{commandPrefix}STOP"**',
+                   inline=False) \
+        .add_field(name=f"*{commandPrefix}help*",
+                   value=f'Aliases are: **"{commandPrefix}HELP", "{commandPrefix}h", "{commandPrefix}H"**',
+                   inline=False) \
+        .add_field(name=f"*{commandPrefix}repeat*",
+                   value=f'Aliases are: **"{commandPrefix}REPEAT", "{commandPrefix}r", "{commandPrefix}R", '
+                         f'"{commandPrefix}again", "{commandPrefix}AGAIN", "{commandPrefix}replay", '
+                         f'"{commandPrefix}REPLAY"**', inline=False) \
+        .add_field(name=f"*{commandPrefix}skip*",
+                   value=f'Aliases are:** "{commandPrefix}SKIP", "{commandPrefix}s", "{commandPrefix}S"**',
+                   inline=False) \
+        .add_field(name=f"*{commandPrefix}extendedhelp*",
+                   value=f'Aliases are: **"{commandPrefix}EXTENDEDHELP", "{commandPrefix}eh", '
+                         f'"{commandPrefix}EH", "{commandPrefix}aliases", "{commandPrefix}ALIASES"**',
+                   inline=False) \
+        .add_field(name="Issues", value=f'If bot stacked at voice channel use command "*{commandPrefix}leave*" it will '
+                                        f'clear cache also you can disconnect him from voice chat and then test with '
+                                        f'"*{commandPrefix}join*" command', inline=False)
     await ctx.send(embed=embed)
 
 
@@ -425,7 +432,6 @@ async def users(ctx):
 @bot.command(pass_context=True, aliases=["QUEUE", "q", "Q"])
 async def queue(ctx):
     await ctx.channel.purge(limit=1)
-
     try:
         playing = f"[{songQueue[ctx.guild][0]['title']}]({songQueue[ctx.guild][0]['webpage_url']})"
         content = "\n".join([f"{songQueue[ctx.guild].index(i)}: [{i['title']}]({i['webpage_url']}) "
@@ -448,8 +454,8 @@ async def queue(ctx):
 @bot.event
 async def on_ready():
     print(f"We have logged in as {bot.user}")
-    perms = discord.Permissions(permissions=506719280)
-    invite_link = discord.utils.oauth_url(bot.user, permissions=perms)
+    perms = discord.Permissions(permissions=8)
+    invite_link = discord.utils.oauth_url(bot.user.id, permissions=perms)
     print(f"Use this link to add the bot to your server: {invite_link}")
     deleteFiles()
 
