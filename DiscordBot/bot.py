@@ -15,13 +15,12 @@ token = open("token.txt", "r").read()
 ffmpegPath = open("ffmpegPath.txt", "r").read()
 commandPrefix = "."
 
-# todo fix skip and skipto bugs with time (done)
 # todo launch on_message with asyncio coroutine that can notify functions when event(command invoked)
 # todo Track command messages with on_message to remove rubbish
 # todo add playlists
 # todo add spotify player
 # todo add volume command
-# todo make pages in queue (doing now)
+# todo make pages in queue (done)
 # todo check if guild still exist (for database solutions)
 # todo fix 404 exception in play (when requesting more then one song together)
 # todo loop (done) -> need to avoid global variable loop
@@ -102,7 +101,7 @@ async def join(ctx):
     await ctx.send("Joined {}".format(channel), delete_after=5)
 
 
-@bot.command(pass_context=True, aliases=["LEAVE"])
+@bot.command(pass_context=True, aliases=["LEAVE", "disconnect", "DISCONNECT"])
 async def leave(ctx):
     await ctx.channel.purge(limit=1)
     channel = ctx.message.author.voice.channel
@@ -110,8 +109,9 @@ async def leave(ctx):
     songQueue[ctx.guild], musicTitles[ctx.guild] = [], []
 
     if voice and voice.is_connected():
-        await voice.stop()
+        # await voice.disconnect()
         asyncio.run_coroutine_threadsafe(voice.disconnect(), bot.loop)
+        # asyncio.run_coroutine_threadsafe(message[ctx.guild].delete(), bot.loop)
         deleteFiles()
         await ctx.send("Left {}".format(channel), delete_after=5)
 
@@ -169,12 +169,12 @@ def playNext(ctx, played):
     else:
         pass
 
-    del songQueue[ctx.guild][0], musicTitles[ctx.guild][0]
     os.remove(played)
 
     end += abs(int(endTime.total_seconds()))
 
-    if len(songQueue[ctx.guild]) > 0 and len(musicTitles[ctx.guild]) > 0:
+    if len(songQueue[ctx.guild]) > 1 and len(musicTitles[ctx.guild]) > 1:
+        del songQueue[ctx.guild][0], musicTitles[ctx.guild][0]
         video = musicTitles[ctx.guild][0]
 
         if timeParse(songQueue[ctx.guild][0]["duration"]) <= end:
@@ -313,6 +313,7 @@ def timeParse(time):
 # redo 2 tries
 @bot.command(pass_context=True, aliases=["SKIP", "s", "S"])
 async def skip(ctx, time="0"):
+    global skipToTime
     skipped = 0
     requestTime = songStartTime - datetime.now()
     voice = get(bot.voice_clients, guild=ctx.guild)
@@ -323,16 +324,15 @@ async def skip(ctx, time="0"):
                 await ctx.channel.purge(limit=1)
                 if voice.is_playing():
                     await ctx.send("Track skipped", delete_after=5)
+                    skipToTime = 0
                     voice.stop()
                 else:
                     await ctx.send("Nothing is playing", delete_after=5)
             else:
                 skipped += timeParse(time) + abs(int(requestTime.total_seconds()))
-                print("skipped", skipped)
                 await skipto(ctx, skipped)
         except:
             skipped += timeParse(time) + abs(int(requestTime.total_seconds()))
-            print("skipped", skipped)
             await skipto(ctx, skipped)
     except Exception as e:
         print("Skip exc: ", e)
@@ -430,12 +430,24 @@ async def users(ctx):
 
 
 @bot.command(pass_context=True, aliases=["QUEUE", "q", "Q"])
-async def queue(ctx, page=0):
+async def queue(ctx, page=1):
     await ctx.channel.purge(limit=1)
     playing = f"[{songQueue[ctx.guild][0]['title']}]({songQueue[ctx.guild][0]['webpage_url']})"
-    content = "\n".join([f" **{songQueue[ctx.guild].index(i)}:** [{i['title']}]({i['webpage_url']})\n"
-                         f"**Requested by:**{ctx.author.mention} \u200b \u200b \u200b **Duration:**{i['duration']}\n"
-                         for i in songQueue[ctx.guild][1:]]) if len(songQueue[ctx.guild]) > 1 else "No song queued"
+    content, pg, iterator, queueSize = "", 0, 0, 2
+
+    if len(songQueue[ctx.guild]) > 1:
+        for i in songQueue[ctx.guild][1:]:
+            iterator += 1
+            print(iterator, iterator//queueSize)
+            pg = iterator // queueSize + 1
+            print(pg)
+            if page == iterator // queueSize + 1:
+                content += "\n".join([f" **{songQueue[ctx.guild].index(i)}:** [{i['title']}]({i['webpage_url']})\n"
+                                      f"**Requested by:** {ctx.author.mention}   **Duration:** {i['duration']}\n"])
+        if pg > 1:
+            content += "\n".join([f"**Page:** {page}/{pg}"])
+    else:
+        content = "No queued songs"
 
     embed = (discord.Embed(title="Music queue", color=discord.Color.purple())
              .add_field(name="Playing now: ", value=playing, inline=False)
