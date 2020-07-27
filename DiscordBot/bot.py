@@ -18,9 +18,9 @@ commandPrefix = "."
 # todo launch on_message with asyncio coroutine that can notify functions when event(command invoked)
 # todo Track command messages with on_message to remove rubbish
 # todo add playlists
+# todo fix queue bug (done)
 # todo add spotify player
 # todo add volume command
-# todo make pages in queue (done)
 # todo check if guild still exist (for database solutions)
 # todo fix 404 exception in play (when requesting more then one song together)
 # todo loop (done) -> need to avoid global variable loop
@@ -433,15 +433,14 @@ async def users(ctx):
 async def queue(ctx, page=1):
     await ctx.channel.purge(limit=1)
     playing = f"[{songQueue[ctx.guild][0]['title']}]({songQueue[ctx.guild][0]['webpage_url']})"
-    content, pg, iterator, queueSize = "", 0, 0, 2
+    content, pg, iterator, queueSize = "", 0, 1, 10
 
     if len(songQueue[ctx.guild]) > 1:
         for i in songQueue[ctx.guild][1:]:
             iterator += 1
-            print(iterator, iterator//queueSize)
-            pg = iterator // queueSize + 1
-            print(pg)
-            if page == iterator // queueSize + 1:
+            pg = iterator // queueSize
+
+            if page == iterator // queueSize:
                 content += "\n".join([f" **{songQueue[ctx.guild].index(i)}:** [{i['title']}]({i['webpage_url']})\n"
                                       f"**Requested by:** {ctx.author.mention}   **Duration:** {i['duration']}\n"])
         if pg > 1:
@@ -471,6 +470,12 @@ async def errorHandler(ctx, error):
         await ctx.send("You're not connected to the voice channel or nothing playing now", delete_after=5)
     elif isinstance(error, commands.MissingRequiredArgument):
         await ctx.send("Command requires argument", delete_after=5)
+    elif isinstance(error, commands.CommandNotFound):
+        await ctx.send("No such command", delete_after=5)
+    elif isinstance(error, commands.ConversionError):
+        await ctx.send("Sorry requested video can't be decoded, try one more time please", delete_after=5)
+    elif isinstance(error, commands.TooManyArguments):
+        await ctx.send("To many arguments, please check if everything is okey", delete_after=5)
     else:
         print("Error handler:", error)
 
