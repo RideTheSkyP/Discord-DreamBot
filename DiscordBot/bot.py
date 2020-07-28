@@ -8,17 +8,11 @@ import requests
 from discord.ext import commands
 from discord.utils import get
 
-joined, messages, guildId, songIterator, skipToTime, songStartTime, pauseTime = 0, 0, 0, 0, 0, 0, 0
-loop = False
-songQueue, musicTitles, message = {}, {}, {}
-token = open("token.txt", "r").read()
-ffmpegPath = open("ffmpegPath.txt", "r").read()
-commandPrefix = "."
-
 # todo launch on_message with asyncio coroutine that can notify functions when event(command invoked)
 # todo Track command messages with on_message to remove rubbish
 # todo add playlists
-# todo fix queue bug (done)
+# todo fix queue (doing now)
+# todo add timeParse to skipto (doing now)
 # todo add spotify player
 # todo add volume command
 # todo check if guild still exist (for database solutions)
@@ -33,44 +27,43 @@ commandPrefix = "."
 # todo set pause timer in settings
 # todo set color of embed message and queue in settings
 # todo set command_prefix in settings
+joined, messages, guildId, songIterator, skipToTime, songStartTime, pauseTime = 0, 0, 0, 0, 0, 0, 0
+loop = False
+songQueue, musicTitles, message = {}, {}, {}
+token = open("token.txt", "r").read()
+ffmpegPathUrl = open("ffmpegPathUrl.txt", "r").read()
+commandPrefix = "."
+
 bot = commands.Bot(command_prefix=commandPrefix)
 bot.remove_command("help")
 musicPath = "data/audio/cache/"
 playlistPath = "data/audio/playlist/"
 
-# check what happen if remove socket timeout
+# add to ydlOptions "extract_flat": True and "simulate": True (for extracting information)
 ydlOptions = {
-    "socket_timeout": 5,
-    "source_address": "0.0.0.0",
-    "extractaudio": True,
-    "audioformat": "mp3",
-    "no-check-certificate": True,
-    "ignoreerrors": False,
-    "default_search": "auto",
-    "outtmpl": "data/audio/cache/%(id)s.%(ext)s",
-    "encoding": "utf-8",
     "format": "bestaudio/best",
     "noplaylist": True,
-    "postprocessors": [{
-        "key": "FFmpegExtractAudio",
-        "preferredcodec": "mp3",
-        "preferredquality": "192"
-    }],
-    "postprocessor_args": [
-        "-ar", "16000"
-    ],
+    # "extract_flat": True,
+    "simulate": True,
+    # "postprocessors": [{
+    #                 "key": "FFmpegExtractAudio",
+    #                 "preferredcodec": "mp3",
+    #                 "preferredquality": "192"
+    #             }],
+    # "postprocessor_args": [
+    #     "-ar", "16000"
+    # ],
     "prefer_ffmpeg": True,
-    "ffmpeg_location": ffmpegPath
+    "ffmpeg_location": ffmpegPathUrl
 }
 
 ffmpegOptions = {
-    "before_options": f"-ss {skipToTime}",
+    "before_options": f"-ss {skipToTime} -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 5",
     "options": "-vn"
 }
 
 
 # todo redo with using a database || reading previous messages (preferred to read)
-# add nickname changes tracking
 # async def update_stats():
 #     await bot.wait_until_ready()
 #     global messages, joined
@@ -91,7 +84,6 @@ async def join(ctx):
     await ctx.channel.purge(limit=1)
     channel = ctx.message.author.voice.channel
     voice = get(ctx.bot.voice_clients, guild=ctx.guild)
-    deleteFiles()
 
     if voice and voice.is_connected():
         await voice.move_to(channel)
@@ -103,6 +95,7 @@ async def join(ctx):
 
 @bot.command(pass_context=True, aliases=["LEAVE", "disconnect", "DISCONNECT"])
 async def leave(ctx):
+    global loop
     await ctx.channel.purge(limit=1)
     channel = ctx.message.author.voice.channel
     voice = get(ctx.bot.voice_clients)
@@ -112,7 +105,7 @@ async def leave(ctx):
         # await voice.disconnect()
         asyncio.run_coroutine_threadsafe(voice.disconnect(), bot.loop)
         # asyncio.run_coroutine_threadsafe(message[ctx.guild].delete(), bot.loop)
-        deleteFiles()
+        loop = False
         await ctx.send("Left {}".format(channel), delete_after=5)
 
 
@@ -156,8 +149,8 @@ def search(author, url):
                 "duration": parseDuration(info["duration"])}
 
 
-def playNext(ctx, played):
-    global skipToTime, songStartTime
+def playNext(ctx):
+    global skipToTime, songStartTime, loop
     endTime = songStartTime - datetime.now()
     end = skipToTime
     ffmpegOptions["before_options"] = f"-ss {skipToTime}"
@@ -169,56 +162,27 @@ def playNext(ctx, played):
     else:
         pass
 
-    os.remove(played)
-
     end += abs(int(endTime.total_seconds()))
 
     if len(songQueue[ctx.guild]) > 1 and len(musicTitles[ctx.guild]) > 1:
         del songQueue[ctx.guild][0], musicTitles[ctx.guild][0]
-        video = musicTitles[ctx.guild][0]
 
         if timeParse(songQueue[ctx.guild][0]["duration"]) <= end:
             skipToTime = 0
             voice.stop()
 
-        song = download(video)
         asyncio.run_coroutine_threadsafe(edit_message(ctx), bot.loop)
         songStartTime = datetime.now()
 
-        voice.play(discord.FFmpegPCMAudio(executable=ffmpegPath, source=song, **ffmpegOptions),
-                   after=lambda e: playNext(ctx, song))
+        voice.play(discord.FFmpegPCMAudio(executable=ffmpegPathUrl,
+                                          source=songQueue[ctx.guild][0]["source"], **ffmpegOptions),
+                   after=lambda e: playNext(ctx))
         voice.is_playing()
     else:
         # asyncio.sleep(pauseTime)
         asyncio.run_coroutine_threadsafe(voice.disconnect(), bot.loop)
         asyncio.run_coroutine_threadsafe(message[ctx.guild].delete(), bot.loop)
-        deleteFiles()
-
-
-def download(url):
-    global songIterator
-    with youtube_dl.YoutubeDL(ydlOptions) as ydl:
-        try:
-            requests.get(url)
-        except:
-            info = ydl.extract_info(f"ytsearch:{url}", download=True)["entries"][0]
-        else:
-            info = ydl.extract_info(url, download=True)
-
-        filename = ydl.prepare_filename(info)
-        songIterator += 1
-        songTitle = os.path.splitext(filename)[0]
-        os.rename(songTitle + ".mp3", songTitle + f"{songIterator}.mp3")
-        file = os.path.join(songTitle + f"{songIterator}.mp3")
-
-        try:
-            if os.path.exists(os.path.join(musicPath + filename)):
-                os.remove(os.path.join(musicPath + filename))
-            else:
-                pass
-        except Exception as e:
-            print("Download exception", e)
-    return file
+        loop = False
 
 
 @bot.command(pass_context=True, aliases=["PLAY", "p", "P"])
@@ -236,13 +200,13 @@ async def play(ctx, *video: str):
         voice = await channel.connect()
 
     if not voice.is_playing():
-        file = download(video)
         songQueue[ctx.guild] = [song]
         musicTitles[ctx.guild] = [video]
         message[ctx.guild] = await ctx.send(embed=song["embed"])
         songStartTime = datetime.now()
-        voice.play(discord.FFmpegPCMAudio(executable=ffmpegPath, source=file, **ffmpegOptions),
-                   after=lambda e: playNext(ctx, file))
+        voice.play(discord.FFmpegPCMAudio(executable=ffmpegPathUrl,
+                                          source=songQueue[ctx.guild][0]["source"], **ffmpegOptions),
+                   after=lambda e: playNext(ctx))
         voice.is_playing()
     else:
         songQueue[ctx.guild].append(song)
@@ -297,6 +261,7 @@ async def pause(ctx):
         if voice.is_playing():
             await ctx.send("Music paused", delete_after=5)
             voice.pause()
+            voice.is_paused()
         else:
             await ctx.send("Music resumed", delete_after=5)
             voice.resume()
@@ -432,20 +397,30 @@ async def users(ctx):
 @bot.command(pass_context=True, aliases=["QUEUE", "q", "Q"])
 async def queue(ctx, page=1):
     await ctx.channel.purge(limit=1)
-    playing = f"[{songQueue[ctx.guild][0]['title']}]({songQueue[ctx.guild][0]['webpage_url']})"
-    content, pg, iterator, queueSize = "", 0, 1, 10
+    voice = get(bot.voice_clients, guild=ctx.guild)
+    playing, content, pg, iterator, queueSize = "", "", 0, 1, 5
+
+    if voice and voice.is_playing:
+        playing = f"[{songQueue[ctx.guild][0]['title']}]({songQueue[ctx.guild][0]['webpage_url']})"
+    else:
+        await ctx.send("Nothing playing now", delete_after=10)
 
     if len(songQueue[ctx.guild]) > 1:
+
         for i in songQueue[ctx.guild][1:]:
             iterator += 1
             pg = iterator // queueSize
+ 
 
             if page == iterator // queueSize:
+    
                 content += "\n".join([f" **{songQueue[ctx.guild].index(i)}:** [{i['title']}]({i['webpage_url']})\n"
                                       f"**Requested by:** {ctx.author.mention}   **Duration:** {i['duration']}\n"])
         if pg > 1:
+
             content += "\n".join([f"**Page:** {page}/{pg}"])
     else:
+
         content = "No queued songs"
 
     embed = (discord.Embed(title="Music queue", color=discord.Color.purple())
@@ -458,12 +433,21 @@ async def queue(ctx, page=1):
     await ctx.send(embed=embed)
 
 
+# @bot.command(pass_context=True)
+# async def volume(ctx, volume: int):
+#     await ctx.channel.purge(limit=1)
+#     voice = get(bot.voice_clients, guild=ctx.guild)
+#     voice.volume = volume / 100
+#     await ctx.send(f"Volume changed to {volume}%", delete_after=5)
+
+
 @play.error
 @repeat.error
 @pause.error
 @skip.error
 @skipto.error
 @queue.error
+# @volume.error
 async def errorHandler(ctx, error):
     if isinstance(error, commands.CommandInvokeError):
         print(error)
@@ -486,7 +470,6 @@ async def on_ready():
     perms = discord.Permissions(permissions=8)
     invite_link = discord.utils.oauth_url(bot.user.id, permissions=perms)
     print(f"Use this link to add bot to your server: {invite_link}")
-    deleteFiles()
 
     activity = discord.Game(name=f"{commandPrefix}help", type=3)
     await bot.change_presence(activity=activity)
@@ -524,14 +507,6 @@ async def on_member_update(before, after):
                 await after.edit(nick=lastNickname)
             else:
                 await after.edit(nick="Nickname dream is reserved by bot, please change yours role or nickname")
-
-
-def deleteFiles():
-    global songIterator, loop
-    loop = False
-    for files in os.listdir(musicPath):
-        os.remove(os.path.join(musicPath + files))
-    songIterator = 0
 
 
 # bot.loop.create_task(update_stats())
