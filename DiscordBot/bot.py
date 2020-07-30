@@ -1,7 +1,6 @@
 import discord
 from datetime import datetime
 import asyncio
-import os
 import shutil
 import youtube_dl
 import requests
@@ -11,6 +10,7 @@ from discord.utils import get
 joined, messages, guildId, songIterator, skipToTime, songStartTime, pauseTime = 0, 0, 0, 0, 0, 0, 0
 loop = False
 songQueue, musicTitles, message = {}, {}, {}
+embedColor = discord.Color.purple()
 token = open("token.txt", "r").read()
 ffmpegPathUrl = open("ffmpegPathUrl.txt", "r").read()
 commandPrefix = "."
@@ -18,22 +18,21 @@ commandPrefix = "."
 # todo launch on_message with asyncio coroutine that can notify functions when event(command invoked)
 # todo Track command messages with on_message to remove rubbish
 # todo add playlists
-# todo fix queue issue (done)
-# todo add timeParse to skipto (done)
+# todo redo 2 tries in skip command
 # todo add spotify player
 # todo add volume command
 # todo check if guild still exist (for database solutions)
-# todo fix 404 exception in play (when requesting more then one song together)
-# todo loop (done) -> need to avoid global variable loop
+# todo loop (done) -> need to avoid global boolean variable loop
 # todo extract direct url to youtube from [query] and link it with music title
 # todo list a youtube playlist with choice indices on play command
 # todo fix url with youtube playlists (currently playing 1st song in playlist, need to play exact one)
 # todo create channel
-# todo create settings command
+# todo create settings command (done)
 # todo set delete time for play command in settings
+# todo add to settings deleting all other commands which are unnecessary
 # todo set pause timer in settings
-# todo set color of embed message and queue in settings
-# todo set command_prefix in settings
+# todo set color of embed message and queue in settings (done)
+# todo set command_prefix in settings (done)
 
 bot = commands.Bot(command_prefix=commandPrefix)
 bot.remove_command("help")
@@ -43,16 +42,16 @@ playlistPath = "data/audio/playlist/"
 ydlOptions = {
     "format": "bestaudio/best",
     "noplaylist": True,
+    "encoding": "utf-8",
+    "default_search": "auto",
+    "ignoreerrors": False,
+    "no-check-certificate": True,
+    "socket_timeout": 5,
+    "source_address": "0.0.0.0",
+    "extractaudio": True,
+    "audioformat": "mp3",
     # "extract_flat": True,
     "simulate": True,
-    # "postprocessors": [{
-    #                 "key": "FFmpegExtractAudio",
-    #                 "preferredcodec": "mp3",
-    #                 "preferredquality": "192"
-    #             }],
-    # "postprocessor_args": [
-    #     "-ar", "16000"
-    # ],
     "prefer_ffmpeg": True,
     "ffmpeg_location": ffmpegPathUrl
 }
@@ -137,7 +136,7 @@ def search(author, url):
             info = ydl.extract_info(url, download=False)
 
         embed = (discord.Embed(title="Currently playing: ", description=f"[{info['title']}]({info['webpage_url']})",
-                               color=discord.Color.purple())
+                               color=embedColor)
                  .add_field(name="Duration", value=parseDuration(info["duration"]))
                  .add_field(name="Requested by", value=author)
                  .add_field(name="Uploader", value=f"[{info['uploader']}]({info['channel_url']})")
@@ -256,7 +255,6 @@ async def loop(ctx):
         loop = True
 
 
-# check if download is necessary
 @bot.command(pass_context=True, aliases=["PAUSE", "stop", "STOP", "resume", "RESUME"])
 async def pause(ctx):
     await ctx.channel.purge(limit=1)
@@ -280,7 +278,6 @@ def timeParse(time):
     return seconds
 
 
-# redo 2 tries
 @bot.command(pass_context=True, aliases=["SKIP", "s", "S"])
 async def skip(ctx, time="0"):
     global skipToTime
@@ -334,10 +331,84 @@ async def skipto(ctx, time):
     await edit_message(ctx)
 
 
+def chooseEmbedColor(color):
+    global embedColor
+    embedTitle = f"Your new discord embeds color is *{color}*"
+
+    if color == "blue":
+        embedColor = discord.Color.blue()
+    elif color == "purple":
+        embedColor = discord.Color.purple()
+    elif color == "blue-purple":
+        embedColor = discord.Color.blurple()
+    elif color == "dark-blue":
+        embedColor = discord.Color.dark_blue()
+    elif color == "dark-gold":
+        embedColor = discord.Color.dark_gold()
+    elif color == "dark-green":
+        embedColor = discord.Color.dark_green()
+    elif color == "dark-grey":
+        embedColor = discord.Color.dark_grey()
+    elif color == "dark-magenta":
+        embedColor = discord.Color.dark_magenta()
+    elif color == "dark-orange":
+        embedColor = discord.Color.dark_orange()
+    elif color == "dark-purple":
+        embedColor = discord.Color.dark_purple()
+    elif color == "dark-red":
+        embedColor = discord.Color.dark_red()
+    elif color == "dark-teal":
+        embedColor = discord.Color.dark_teal()
+    elif color == "gold":
+        embedColor = discord.Color.gold()
+    elif color == "green":
+        embedColor = discord.Color.green()
+    elif color == "light-grey":
+        embedColor = discord.Color.light_grey()
+    elif color == "magenta":
+        embedColor = discord.Color.magenta()
+    elif color == "orange":
+        embedColor = discord.Color.orange()
+    elif color == "red":
+        embedColor = discord.Color.red()
+    elif color == "teal":
+        embedColor = discord.Color.teal()
+    else:
+        embedTitle = f"No such color is presented, please choose something from *{commandPrefix}settings " \
+                       f"embedColor*\nYour current embed color wasn't changed"
+    return embedTitle
+
+
+@bot.command(pass_context=True, aliases=["SETTINGS", "set", "SET"])
+async def settings(ctx, task=None, *args):
+    await ctx.channel.purge(limit=1)
+    global pauseTime, commandPrefix, embedColor
+
+    if task is None:
+        await ctx.send(f"Your new ")
+    elif task == "commandPrefix":
+        if not args:
+            await ctx.send("Please give a prefix after [commandPrefix]", delete_after=5)
+        else:
+            commandPrefix = args[0]
+            bot.command_prefix = commandPrefix
+            await ctx.send(f"Your new command prefix is {args[0]}")
+    elif task == "embedColor":
+        if not args:
+            await ctx.send(f"**Possible colors are**\n*blue\npurple\nred\norange\ngreen\nmagenta\nteal\ngold*\n"
+                           f"*blue-purple\nlight-grey\ndark-blue\ndark-gold\ndark-green\ndark-purple\ndark-grey*\n"
+                           f"*dark-magenta\ndark-orange\ndark-red\ndark-teal*\nUse command "
+                           f"__*{commandPrefix}settings embedColor dark-purple*__ to set embeds color")
+        else:
+            embedTitle = chooseEmbedColor(args[0])
+            embed = discord.Embed(title=embedTitle, color=embedColor)
+            await ctx.send(embed=embed)
+
+
 @bot.command(pass_context=True, aliases=["HELP", "h", "H"])
 async def help(ctx):
     await ctx.channel.purge(limit=1)
-    embed = discord.Embed(title="Help", description="Commands", color=discord.Color.purple()) \
+    embed = discord.Embed(title="Help", description="Commands", color=embedColor) \
         .add_field(name=f"*{commandPrefix}hello*", value="Greets the user", inline=True) \
         .add_field(name=f"*{commandPrefix}users*", value="Prints number of users", inline=True) \
         .add_field(name=f"*{commandPrefix}join*", value="Bot will join voice channel", inline=True) \
@@ -362,7 +433,7 @@ async def help(ctx):
 @bot.command(pass_context=True, aliases=["EXTENDEDHELP", "eh", "Eh", "aliases", "ALIASES"])
 async def extendedhelp(ctx):
     await ctx.channel.purge(limit=1)
-    embed = discord.Embed(title="Help", description="Extended help commands and aliases", color=discord.Color.purple()) \
+    embed = discord.Embed(title="Help", description="Extended help commands and aliases", color=embedColor) \
         .add_field(name=f"*{commandPrefix}play*",
                    value=f'Aliases are: "**{commandPrefix}PLAY**", "**{commandPrefix}p**", "**{commandPrefix}P**"',
                    inline=False) \
@@ -412,24 +483,19 @@ async def queue(ctx, page=1):
         await ctx.send("Nothing playing now", delete_after=10)
 
     if len(songQueue[ctx.guild]) > 1:
-        print("if")
         for i in songQueue[ctx.guild][1:]:
             iterator += 1
             pg = iterator // queueSize + 1
-            print("for", iterator, pg)
 
             if page == iterator // queueSize:
-                print("iterator")
                 content += "\n".join([f" **{songQueue[ctx.guild].index(i)}:** [{i['title']}]({i['webpage_url']})\n"
                                       f"**Requested by:** {ctx.author.mention}   **Duration:** {i['duration']}\n"])
         if pg > 1:
-            print("pg")
             content += "\n".join([f"**Page:** {page + 1}/{pg}"])
     else:
-        print("else")
         content = "No queued songs"
 
-    embed = (discord.Embed(title="Music queue", color=discord.Color.purple())
+    embed = (discord.Embed(title="Music queue", color=embedColor)
              .add_field(name="Playing now: ", value=playing, inline=False)
              .add_field(name="Requested by", value=f"{ctx.author.mention}", inline=True)
              .add_field(name="Duration", value=songQueue[ctx.guild][0]['duration'], inline=True)
@@ -449,10 +515,12 @@ async def queue(ctx, page=1):
 
 @play.error
 @repeat.error
+@leave.error
 @pause.error
 @skip.error
 @skipto.error
 @queue.error
+@settings.error
 # @volume.error
 async def errorHandler(ctx, error):
     if isinstance(error, commands.CommandInvokeError):
