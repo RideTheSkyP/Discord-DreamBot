@@ -8,11 +8,18 @@ import requests
 from discord.ext import commands
 from discord.utils import get
 
+joined, messages, guildId, songIterator, skipToTime, songStartTime, pauseTime = 0, 0, 0, 0, 0, 0, 0
+loop = False
+songQueue, musicTitles, message = {}, {}, {}
+token = open("token.txt", "r").read()
+ffmpegPathUrl = open("ffmpegPathUrl.txt", "r").read()
+commandPrefix = "."
+
 # todo launch on_message with asyncio coroutine that can notify functions when event(command invoked)
 # todo Track command messages with on_message to remove rubbish
 # todo add playlists
-# todo fix queue (doing now)
-# todo add timeParse to skipto (doing now)
+# todo fix queue issue (done)
+# todo add timeParse to skipto (done)
 # todo add spotify player
 # todo add volume command
 # todo check if guild still exist (for database solutions)
@@ -27,19 +34,12 @@ from discord.utils import get
 # todo set pause timer in settings
 # todo set color of embed message and queue in settings
 # todo set command_prefix in settings
-joined, messages, guildId, songIterator, skipToTime, songStartTime, pauseTime = 0, 0, 0, 0, 0, 0, 0
-loop = False
-songQueue, musicTitles, message = {}, {}, {}
-token = open("token.txt", "r").read()
-ffmpegPathUrl = open("ffmpegPathUrl.txt", "r").read()
-commandPrefix = "."
 
 bot = commands.Bot(command_prefix=commandPrefix)
 bot.remove_command("help")
 musicPath = "data/audio/cache/"
 playlistPath = "data/audio/playlist/"
 
-# add to ydlOptions "extract_flat": True and "simulate": True (for extracting information)
 ydlOptions = {
     "format": "bestaudio/best",
     "noplaylist": True,
@@ -119,7 +119,7 @@ def parseDuration(duration: int):
 async def edit_message(ctx):
     embed = songQueue[ctx.guild][0]["embed"]
     content = "\n".join([f"**{songQueue[ctx.guild].index(i)}:**"
-                         f"[{i['title']}]({i['webpage_url']}) **Requested by:** {ctx.author.mention} "
+                         f"[{i['title']}]({i['webpage_url']})\n**Requested by:** {ctx.author.mention} "
                          f"**Duration:** {i['duration']}"
                          for i in songQueue[ctx.guild][1:]]) if len(songQueue[ctx.guild]) > 1 else "No songs are queued"
 
@@ -155,6 +155,7 @@ def playNext(ctx):
     end = skipToTime
     ffmpegOptions["before_options"] = f"-ss {skipToTime}"
     voice = get(bot.voice_clients, guild=ctx.guild)
+    voice.is_paused()
 
     if loop is True:
         songQueue[ctx.guild].append(songQueue[ctx.guild][0])
@@ -171,11 +172,14 @@ def playNext(ctx):
             skipToTime = 0
             voice.stop()
 
+        song = search(ctx.author.mention, musicTitles[ctx.guild][0])
+        songQueue[ctx.guild][0] = song
         asyncio.run_coroutine_threadsafe(edit_message(ctx), bot.loop)
         songStartTime = datetime.now()
 
-        voice.play(discord.FFmpegPCMAudio(executable=ffmpegPathUrl,
-                                          source=songQueue[ctx.guild][0]["source"], **ffmpegOptions),
+        voice.play(discord.FFmpegPCMAudio(executable=ffmpegPathUrl, source=songQueue[ctx.guild][0]["source"],
+                                          before_options=f"-ss {skipToTime} -reconnect 1 -reconnect_streamed 1 -reconnect_at_eof 1 -reconnect_delay_max 5",
+                                          options="-vn"),
                    after=lambda e: playNext(ctx))
         voice.is_playing()
     else:
@@ -252,6 +256,7 @@ async def loop(ctx):
         loop = True
 
 
+# check if download is necessary
 @bot.command(pass_context=True, aliases=["PAUSE", "stop", "STOP", "resume", "RESUME"])
 async def pause(ctx):
     await ctx.channel.purge(limit=1)
@@ -319,7 +324,7 @@ async def skipto(ctx, time):
     if voice.is_playing():
         songQueue[ctx.guild].insert(1, songQueue[ctx.guild][0])
         musicTitles[ctx.guild].insert(1, musicTitles[ctx.guild][0])
-        skipToTime += int(time)
+        skipToTime += timeParse(time)
         voice.stop()
     else:
         await ctx.send("Nothing to skip", delete_after=5)
@@ -398,7 +403,8 @@ async def users(ctx):
 async def queue(ctx, page=1):
     await ctx.channel.purge(limit=1)
     voice = get(bot.voice_clients, guild=ctx.guild)
-    playing, content, pg, iterator, queueSize = "", "", 0, 1, 5
+    playing, content, pg, iterator, queueSize = "", "", 0, 0, 5
+    page = page - 1
 
     if voice and voice.is_playing:
         playing = f"[{songQueue[ctx.guild][0]['title']}]({songQueue[ctx.guild][0]['webpage_url']})"
@@ -406,21 +412,21 @@ async def queue(ctx, page=1):
         await ctx.send("Nothing playing now", delete_after=10)
 
     if len(songQueue[ctx.guild]) > 1:
-
+        print("if")
         for i in songQueue[ctx.guild][1:]:
             iterator += 1
-            pg = iterator // queueSize
- 
+            pg = iterator // queueSize + 1
+            print("for", iterator, pg)
 
             if page == iterator // queueSize:
-    
+                print("iterator")
                 content += "\n".join([f" **{songQueue[ctx.guild].index(i)}:** [{i['title']}]({i['webpage_url']})\n"
                                       f"**Requested by:** {ctx.author.mention}   **Duration:** {i['duration']}\n"])
         if pg > 1:
-
-            content += "\n".join([f"**Page:** {page}/{pg}"])
+            print("pg")
+            content += "\n".join([f"**Page:** {page + 1}/{pg}"])
     else:
-
+        print("else")
         content = "No queued songs"
 
     embed = (discord.Embed(title="Music queue", color=discord.Color.purple())
