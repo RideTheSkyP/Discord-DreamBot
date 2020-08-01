@@ -1,23 +1,31 @@
-import discord
-from datetime import datetime
 import asyncio
-import shutil
-import youtube_dl
+from datetime import datetime
 import requests
+import youtube_dl
+import discord
 from discord.ext import commands
 from discord.utils import get
+import shutil
+import mysql.connector
 
 joined, messages, guildId, songIterator, skipToTime, songStartTime, pauseTime = 0, 0, 0, 0, 0, 0, 0
+commandPrefix = "."
 loop = False
 songQueue, musicTitles, message = {}, {}, {}
+
 embedColor = discord.Color.purple()
+
 token = open("token.txt", "r").read()
 ffmpegPathUrl = open("ffmpegPathUrl.txt", "r").read()
-commandPrefix = "."
+creds = open("dbCreds.txt", "r").read().split(";")
 
+# todo extract music genre from youtube (done, extracted video tags)
+# todo connect to database (done)
+# todo make coroutine that checks every 24 hours if guild exists
 # todo launch on_message with asyncio coroutine that can notify functions when event(command invoked)
 # todo Track command messages with on_message to remove rubbish
-# todo add playlists
+# todo add playlists (doing now)
+# todo add to playlists commands add (done), show (doing now), delete playlist (done), delete song from pl (done)
 # todo redo 2 tries in skip command
 # todo add spotify player
 # todo add volume command
@@ -27,12 +35,10 @@ commandPrefix = "."
 # todo list a youtube playlist with choice indices on play command
 # todo fix url with youtube playlists (currently playing 1st song in playlist, need to play exact one)
 # todo create channel
-# todo create settings command (done)
+# todo add description in settings command
 # todo set delete time for play command in settings
 # todo add to settings deleting all other commands which are unnecessary
 # todo set pause timer in settings
-# todo set color of embed message and queue in settings (done)
-# todo set command_prefix in settings (done)
 
 bot = commands.Bot(command_prefix=commandPrefix)
 bot.remove_command("help")
@@ -42,6 +48,7 @@ playlistPath = "data/audio/playlist/"
 ydlOptions = {
     "format": "bestaudio/best",
     "noplaylist": True,
+    # "quite": True,
     "encoding": "utf-8",
     "default_search": "auto",
     "ignoreerrors": False,
@@ -50,7 +57,7 @@ ydlOptions = {
     "source_address": "0.0.0.0",
     "extractaudio": True,
     "audioformat": "mp3",
-    # "extract_flat": True,
+    "extract_flat": False,
     "simulate": True,
     "prefer_ffmpeg": True,
     "ffmpeg_location": ffmpegPathUrl
@@ -61,6 +68,12 @@ ffmpegOptions = {
     "options": "-vn"
 }
 
+mySqlDB = mysql.connector.connect(
+    host=creds[0],
+    user=creds[1],
+    password=creds[2],
+    database=creds[3]
+)
 
 # todo redo with using a database || reading previous messages (preferred to read)
 # async def update_stats():
@@ -152,7 +165,7 @@ def playNext(ctx):
     global skipToTime, songStartTime, loop
     endTime = songStartTime - datetime.now()
     end = skipToTime
-    ffmpegOptions["before_options"] = f"-ss {skipToTime}"
+    ffmpegOptions["before_options"] = f"-ss {skipToTime} -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 5"
     voice = get(bot.voice_clients, guild=ctx.guild)
     voice.is_paused()
 
@@ -177,9 +190,7 @@ def playNext(ctx):
         songStartTime = datetime.now()
 
         voice.play(discord.FFmpegPCMAudio(executable=ffmpegPathUrl, source=songQueue[ctx.guild][0]["source"],
-                                          before_options=f"-ss {skipToTime} -reconnect 1 -reconnect_streamed 1 -reconnect_at_eof 1 -reconnect_delay_max 5",
-                                          options="-vn"),
-                   after=lambda e: playNext(ctx))
+                                          **ffmpegOptions), after=lambda e: playNext(ctx))
         voice.is_playing()
     else:
         # asyncio.sleep(pauseTime)
@@ -375,7 +386,7 @@ def chooseEmbedColor(color):
         embedColor = discord.Color.teal()
     else:
         embedTitle = f"No such color is presented, please choose something from *{commandPrefix}settings " \
-                       f"embedColor*\nYour current embed color wasn't changed"
+                     f"embedColor*\nYour current embed color wasn't changed"
     return embedTitle
 
 
@@ -395,14 +406,72 @@ async def settings(ctx, task=None, *args):
             await ctx.send(f"Your new command prefix is {args[0]}")
     elif task == "embedColor":
         if not args:
-            await ctx.send(f"**Possible colors are**\n*blue\npurple\nred\norange\ngreen\nmagenta\nteal\ngold*\n"
-                           f"*blue-purple\nlight-grey\ndark-blue\ndark-gold\ndark-green\ndark-purple\ndark-grey*\n"
-                           f"*dark-magenta\ndark-orange\ndark-red\ndark-teal*\nUse command "
-                           f"__*{commandPrefix}settings embedColor dark-purple*__ to set embeds color")
+            await ctx.send(embed=discord.Embed(title=f"Possible colors are",
+                                               description="*blue\npurple\nred\norange\ngreen\nmagenta\nteal\ngold*\n"
+                                                           f"*blue-purple\nlight-grey\ndark-blue\ndark-gold\n"
+                                                           f"dark-green\ndark-purple\ndark-grey*\n*dark-magenta\n"
+                                                           f"dark-orange\ndark-red\ndark-teal*\nUse command "
+                                                           f"__*{commandPrefix}settings embedColor dark-purple*__ "
+                                                           f" to set embeds color", color=embedColor))
         else:
             embedTitle = chooseEmbedColor(args[0])
             embed = discord.Embed(title=embedTitle, color=embedColor)
             await ctx.send(embed=embed)
+
+
+def getInfo(query):
+    with youtube_dl.YoutubeDL(ydlOptions) as ydl:
+        try:
+            requests.get(query)
+        except:
+            info = ydl.extract_info(f"ytsearch:{query}", download=False)["entries"][0]
+        else:
+            info = ydl.extract_info(query, download=False)
+    return info
+
+
+@bot.command(pass_context=True, aliases=["PLAYLIST", "pl", "PL"])
+async def playlist(ctx, task, title, *music):
+    query = ""
+    tags = ""
+
+    for i in music:
+        query += f"{i} "
+
+    if not task:
+        # add description of this command
+        print("not task")
+    elif task == "show":
+        if title:
+            pass
+    elif task == "add":
+        info = getInfo(query)
+
+        for i in info["tags"]:
+            if len(tags) < 200:
+                print(len(tags))
+                tags += f"{i} "
+
+        myCursor = mySqlDB.cursor()
+        sqlQuery = "INSERT INTO playlists (guildId, playlistTitle, query, genre) VALUES (%s, %s, %s, %s)"
+        values = (ctx.guild.id, title, query, tags)
+        myCursor.execute(sqlQuery, values)
+        mySqlDB.commit()
+        await ctx.send(f"Music *{query}* is added to {title}")
+    elif task == "delete" and not music:
+        myCursor = mySqlDB.cursor()
+        sqlQuery = "DELETE FROM playlists WHERE guildId=%s AND playlistTitle=%s LIMIT 1"
+        values = (ctx.guild.id, title)
+        myCursor.execute(sqlQuery, values)
+        mySqlDB.commit()
+        await ctx.send(f"Playlist *{title}* is deleted")
+    elif task == "deleteSong":
+        myCursor = mySqlDB.cursor()
+        sqlQuery = "DELETE FROM playlists WHERE guildId=%s AND playlistTitle=%s AND query=%s LIMIT 1"
+        values = (ctx.guild.id, title, query)
+        myCursor.execute(sqlQuery, values)
+        mySqlDB.commit()
+        await ctx.send(f"From playlist *{title}* is deleted {query}")
 
 
 @bot.command(pass_context=True, aliases=["HELP", "h", "H"])
