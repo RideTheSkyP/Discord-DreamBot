@@ -19,13 +19,11 @@ token = open("token.txt", "r").read()
 ffmpegPathUrl = open("ffmpegPathUrl.txt", "r").read()
 creds = open("dbCreds.txt", "r").read().split(";")
 
-# todo extract music genre from youtube (done, extracted video tags)
-# todo connect to database (done)
 # todo make coroutine that checks every 24 hours if guild exists
 # todo launch on_message with asyncio coroutine that can notify functions when event(command invoked)
 # todo Track command messages with on_message to remove rubbish
-# todo add playlists (doing now)
-# todo add to playlists commands add (done), show (doing now), delete playlist (done), delete song from pl (done)
+# todo add playlists (done)
+# todo add to playlists commands show (done), play (done)
 # todo redo 2 tries in skip command
 # todo add spotify player
 # todo add volume command
@@ -34,7 +32,7 @@ creds = open("dbCreds.txt", "r").read().split(";")
 # todo extract direct url to youtube from [query] and link it with music title
 # todo list a youtube playlist with choice indices on play command
 # todo fix url with youtube playlists (currently playing 1st song in playlist, need to play exact one)
-# todo create channel
+# todo create channel [???]
 # todo add description in settings command
 # todo set delete time for play command in settings
 # todo add to settings deleting all other commands which are unnecessary
@@ -431,47 +429,103 @@ def getInfo(query):
 
 
 @bot.command(pass_context=True, aliases=["PLAYLIST", "pl", "PL"])
-async def playlist(ctx, task, title, *music):
+async def playlist(ctx, task=None, title=None, *music):
     query = ""
-    tags = ""
+    myCursor = mySqlDB.cursor()
 
     for i in music:
         query += f"{i} "
 
     if not task:
-        # add description of this command
-        print("not task")
-    elif task == "show":
+        embed = discord.Embed(title="Playlist commands description",
+                              description=f"The pattern of command is\n**{commandPrefix}playlist [task] "
+                                          f"[playlist title] [music title]**", color=embedColor)\
+            .add_field(name=f"{commandPrefix}playlist show", value=f"Shows server playlists", inline=False)\
+            .add_field(name=f"{commandPrefix}playlist show [playlist title]", value=f"Shows all tracks from playlist")\
+            .add_field(name=f"{commandPrefix}playlist play [playlist title]", value=f"Plays all tracks from playlist",
+                       inline=False)\
+            .add_field(name=f"{commandPrefix}playlist add [playlist title] [music]", value=f"Adds music to playlist")\
+            .add_field(name=f"{commandPrefix}playlist delete [playlist title]", value=f"Deletes playlist",
+                       inline=False)\
+            .add_field(name=f"{commandPrefix}playlist delete [playlist title] [music]",
+                       value=f"Deletes song from playlist")
+        await ctx.send(embed=embed)
+    elif task == "play":
         if title:
-            pass
+            sqlQuery = "SELECT DISTINCT query FROM playlists WHERE guildId=%s AND playlistTitle=%s"
+            values = (ctx.guild.id, title)
+            myCursor.execute(sqlQuery, values)
+            records = myCursor.fetchall()
+            for row in records:
+                await play(ctx, row[0])
+        else:
+            await ctx.send("Please give which playlist to play")
+            await playlist(ctx, "show")
+    elif task == "show":
+        if not title:
+            playlists = ""
+            sqlQuery = "SELECT DISTINCT playlistTitle FROM playlists WHERE guildId=%s"
+            values = (ctx.guild.id,)
+            myCursor.execute(sqlQuery, values)
+            records = myCursor.fetchall()
+            for row in records:
+                playlists += f"*{row[0]}*\n"
+            embed = discord.Embed(title="Server playlists", description=f"{playlists}", color=embedColor)
+            await ctx.send(embed=embed)
+        else:
+            songs = ""
+            sqlQuery = "SELECT DISTINCT query FROM playlists WHERE guildId=%s AND playlistTitle=%s"
+            values = (ctx.guild.id, title)
+            myCursor.execute(sqlQuery, values)
+            records = myCursor.fetchall()
+            for row in records:
+                songs += f"*{row[0]}*\n"
+            embed = discord.Embed(title=f"{title} playlist music", description=f"{songs}", color=embedColor)
+            await ctx.send(embed=embed)
     elif task == "add":
-        info = getInfo(query)
+        tags = ""
+        sqlQuery = "SELECT DISTINCT playlistTitle FROM playlists WHERE guildId=%s"
+        values = (ctx.guild.id,)
+        myCursor.execute(sqlQuery, values)
+        playlistsAmount = myCursor.fetchall()
 
-        for i in info["tags"]:
-            if len(tags) < 200:
-                print(len(tags))
-                tags += f"{i} "
+        if len(playlistsAmount) < 3:
+            sqlQuery = "SELECT DISTINCT query FROM playlists WHERE guildId=%s AND playlistTitle=%s"
+            values = (ctx.guild.id, title)
+            myCursor.execute(sqlQuery, values)
+            songsAmount = myCursor.fetchall()
 
-        myCursor = mySqlDB.cursor()
-        sqlQuery = "INSERT INTO playlists (guildId, playlistTitle, query, genre) VALUES (%s, %s, %s, %s)"
-        values = (ctx.guild.id, title, query, tags)
-        myCursor.execute(sqlQuery, values)
-        mySqlDB.commit()
-        await ctx.send(f"Music *{query}* is added to {title}")
-    elif task == "delete" and not music:
-        myCursor = mySqlDB.cursor()
-        sqlQuery = "DELETE FROM playlists WHERE guildId=%s AND playlistTitle=%s LIMIT 1"
-        values = (ctx.guild.id, title)
-        myCursor.execute(sqlQuery, values)
-        mySqlDB.commit()
-        await ctx.send(f"Playlist *{title}* is deleted")
-    elif task == "deleteSong":
-        myCursor = mySqlDB.cursor()
-        sqlQuery = "DELETE FROM playlists WHERE guildId=%s AND playlistTitle=%s AND query=%s LIMIT 1"
-        values = (ctx.guild.id, title, query)
-        myCursor.execute(sqlQuery, values)
-        mySqlDB.commit()
-        await ctx.send(f"From playlist *{title}* is deleted {query}")
+            if len(songsAmount) < 20:
+                info = getInfo(query)
+
+                for i in info["tags"]:
+                    if len(tags) < 200:
+                        tags += f"{i} "
+
+                sqlQuery = "INSERT INTO playlists (guildId, playlistTitle, query, genre) VALUES (%s, %s, %s, %s)"
+                values = (ctx.guild.id, title, query, tags)
+                myCursor.execute(sqlQuery, values)
+                mySqlDB.commit()
+                await ctx.send(f"Song {query} is added to playlist *{title}*")
+            else:
+                await ctx.send(f"Max amount of songs are 20")
+        else:
+            await ctx.send("Max amount of playlists are 3")
+    elif task == "delete":
+        if not music:
+            sqlQuery = "DELETE FROM playlists WHERE guildId=%s AND playlistTitle=%s LIMIT 1"
+            values = (ctx.guild.id, title)
+            myCursor.execute(sqlQuery, values)
+            mySqlDB.commit()
+            await ctx.send(f"Playlist *{title}* is deleted")
+        else:
+            sqlQuery = "DELETE FROM playlists WHERE guildId=%s AND playlistTitle=%s AND query=%s LIMIT 1"
+            values = (ctx.guild.id, title, query)
+            myCursor.execute(sqlQuery, values)
+            mySqlDB.commit()
+            await ctx.send(f"From playlist *{title}* is deleted {query}")
+    else:
+        await ctx.send("No such command")
 
 
 @bot.command(pass_context=True, aliases=["HELP", "h", "H"])
@@ -481,17 +535,17 @@ async def help(ctx):
         .add_field(name=f"*{commandPrefix}hello*", value="Greets the user", inline=True) \
         .add_field(name=f"*{commandPrefix}users*", value="Prints number of users", inline=True) \
         .add_field(name=f"*{commandPrefix}join*", value="Bot will join voice channel", inline=True) \
-        .add_field(name=f"*{commandPrefix}leave*", value="Bot will leave voice channel", inline=False) \
-        .add_field(name=f"*{commandPrefix}play*", value="Request music with url or song title", inline=False) \
+        .add_field(name=f"*{commandPrefix}leave*", value="Bot will leave voice channel", inline=True) \
         .add_field(name=f"*{commandPrefix}skip*", value="Plays next track", inline=True) \
+        .add_field(name=f"*{commandPrefix}play*", value="Request music with url or song title", inline=True) \
         .add_field(name=f"*{commandPrefix}skip 1:20 or 20*", value="Skips next amount of time for 20 skips 20 seconds, "
                                                                    "for 1:20 skips 1 minute 20 seconds, hh:mm:ss format"
-                   , inline=True) \
-        .add_field(name=f"*{commandPrefix}replay*", value="Repeat the track", inline=True) \
+                   , inline=False) \
         .add_field(name=f"*{commandPrefix}pause*", value="Pause music", inline=True) \
-        .add_field(name=f"*{commandPrefix}queue*", value="Shows queue", inline=False) \
+        .add_field(name=f"*{commandPrefix}replay*", value="Repeat the track", inline=True) \
+        .add_field(name=f"*{commandPrefix}queue*", value="Shows queue", inline=True) \
         .add_field(name=f"*{commandPrefix}extendedhelp*\t\t\t*{commandPrefix}aliases*",
-                   value="Shows all aliases and some useful information", inline=True) \
+                   value="Shows all aliases and some useful information", inline=False) \
         .add_field(name="CAPS LOCK", value="You can ignore register and use bot with enabled CAPS LOCK", inline=False) \
         .add_field(name="Playlists",
                    value=f'Playlist are disabled, if you want to enable them, type "*{commandPrefix}settings*"',
@@ -570,7 +624,6 @@ async def queue(ctx, page=1):
              .add_field(name="Duration", value=songQueue[ctx.guild][0]['duration'], inline=True)
              .add_field(name="Queued: ", value=content, inline=False)
              .set_thumbnail(url=songQueue[ctx.guild][0]["thumbnail"]))
-
     await ctx.send(embed=embed)
 
 
@@ -590,6 +643,7 @@ async def queue(ctx, page=1):
 @skipto.error
 @queue.error
 @settings.error
+@playlist.error
 # @volume.error
 async def errorHandler(ctx, error):
     if isinstance(error, commands.CommandInvokeError):
