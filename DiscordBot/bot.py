@@ -19,21 +19,21 @@ token = open("token.txt", "r").read()
 ffmpegPathUrl = open("ffmpegPathUrl.txt", "r").read()
 creds = open("dbCreds.txt", "r").read().split(";")
 
-# todo make coroutine that checks every 24 hours if guild exists
+# todo add remove command to remove songs from queue (doing now)
+# todo make coroutine that checks every 24 hours if guild exists (done)
 # todo launch on_message with asyncio coroutine that can notify functions when event(command invoked)
 # todo Track command messages with on_message to remove rubbish
-# todo add playlists (done)
-# todo add to playlists commands show (done), play (done)
 # todo redo 2 tries in skip command
 # todo add spotify player
-# todo add volume command
-# todo check if guild still exist (for database solutions)
+# todo add volume command [???]
+# todo check if guild still exist (for database solutions) (done)
 # todo loop (done) -> need to avoid global boolean variable loop
 # todo extract direct url to youtube from [query] and link it with music title
 # todo list a youtube playlist with choice indices on play command
 # todo fix url with youtube playlists (currently playing 1st song in playlist, need to play exact one)
 # todo create channel [???]
-# todo add description in settings command
+# todo add description in settings command (done)
+# todo add description of new commands to help and extendedHelp (done)
 # todo set delete time for play command in settings
 # todo add to settings deleting all other commands which are unnecessary
 # todo set pause timer in settings
@@ -72,6 +72,7 @@ mySqlDB = mysql.connector.connect(
     password=creds[2],
     database=creds[3]
 )
+
 
 # todo redo with using a database || reading previous messages (preferred to read)
 # async def update_stats():
@@ -163,7 +164,8 @@ def playNext(ctx):
     global skipToTime, songStartTime, loop
     endTime = songStartTime - datetime.now()
     end = skipToTime
-    ffmpegOptions["before_options"] = f"-ss {skipToTime} -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 5"
+    ffmpegOptions[
+        "before_options"] = f"-ss {skipToTime} -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 5"
     voice = get(bot.voice_clients, guild=ctx.guild)
     voice.is_paused()
 
@@ -394,7 +396,15 @@ async def settings(ctx, task=None, *args):
     global pauseTime, commandPrefix, embedColor
 
     if task is None:
-        await ctx.send(f"Your new ")
+        embed = discord.Embed(title=f"Settings command description", description=f"Command pattern is\n"
+                                                                                 f"**{commandPrefix}settings [task]**"
+                                                                                 f" **[argument]**", color=embedColor) \
+            .add_field(name=f"{commandPrefix}settings commandPrefix [symbol]", value="Sets given symbol as command "
+                                                                                     "prefix") \
+            .add_field(name=f"{commandPrefix}settings embedColor", value=f"Prints all possible embed colors",
+                       inline=False) \
+            .add_field(name=f"{commandPrefix}settings embedColor [color]", value=f"Sets given color as embed color")
+        await ctx.send(embed=embed)
     elif task == "commandPrefix":
         if not args:
             await ctx.send("Please give a prefix after [commandPrefix]", delete_after=5)
@@ -439,14 +449,14 @@ async def playlist(ctx, task=None, title=None, *music):
     if not task:
         embed = discord.Embed(title="Playlist commands description",
                               description=f"The pattern of command is\n**{commandPrefix}playlist [task] "
-                                          f"[playlist title] [music title]**", color=embedColor)\
-            .add_field(name=f"{commandPrefix}playlist show", value=f"Shows server playlists", inline=False)\
-            .add_field(name=f"{commandPrefix}playlist show [playlist title]", value=f"Shows all tracks from playlist")\
+                                          f"[playlist title] [music title]**", color=embedColor) \
+            .add_field(name=f"{commandPrefix}playlist show", value=f"Shows server playlists", inline=False) \
+            .add_field(name=f"{commandPrefix}playlist show [playlist title]", value=f"Shows all tracks from playlist") \
             .add_field(name=f"{commandPrefix}playlist play [playlist title]", value=f"Plays all tracks from playlist",
-                       inline=False)\
-            .add_field(name=f"{commandPrefix}playlist add [playlist title] [music]", value=f"Adds music to playlist")\
+                       inline=False) \
+            .add_field(name=f"{commandPrefix}playlist add [playlist title] [music]", value=f"Adds music to playlist") \
             .add_field(name=f"{commandPrefix}playlist delete [playlist title]", value=f"Deletes playlist",
-                       inline=False)\
+                       inline=False) \
             .add_field(name=f"{commandPrefix}playlist delete [playlist title] [music]",
                        value=f"Deletes song from playlist")
         await ctx.send(embed=embed)
@@ -479,7 +489,7 @@ async def playlist(ctx, task=None, title=None, *music):
             myCursor.execute(sqlQuery, values)
             records = myCursor.fetchall()
             for row in records:
-                songs += f"*{row[0]}*\n"
+                songs += f"{row[0]}\n"
             embed = discord.Embed(title=f"{title} playlist music", description=f"{songs}", color=embedColor)
             await ctx.send(embed=embed)
     elif task == "add":
@@ -506,7 +516,7 @@ async def playlist(ctx, task=None, title=None, *music):
                 values = (ctx.guild.id, title, query, tags)
                 myCursor.execute(sqlQuery, values)
                 mySqlDB.commit()
-                await ctx.send(f"Song {query} is added to playlist *{title}*")
+                await ctx.send(f"Song {query} has been added to playlist *{title}*")
             else:
                 await ctx.send(f"Max amount of songs are 20")
         else:
@@ -541,9 +551,14 @@ async def help(ctx):
         .add_field(name=f"*{commandPrefix}skip 1:20 or 20*", value="Skips next amount of time for 20 skips 20 seconds, "
                                                                    "for 1:20 skips 1 minute 20 seconds, hh:mm:ss format"
                    , inline=False) \
+        .add_field(name=f"*{commandPrefix}skipto 1:20 or 20*", value="Skips to exact time for 20 skips 20 seconds, for "
+                                                                     "1:20 skips 1 minute 20 seconds, hh:mm:ss format"
+                   , inline=False) \
         .add_field(name=f"*{commandPrefix}pause*", value="Pause music", inline=True) \
         .add_field(name=f"*{commandPrefix}replay*", value="Repeat the track", inline=True) \
         .add_field(name=f"*{commandPrefix}queue*", value="Shows queue", inline=True) \
+        .add_field(name=f"*{commandPrefix}settings", value=f"Shows all settings command") \
+        .add_field(name=f"*{commandPrefix}playlist", value=f"Shows all playlist command") \
         .add_field(name=f"*{commandPrefix}extendedhelp*\t\t\t*{commandPrefix}aliases*",
                    value="Shows all aliases and some useful information", inline=False) \
         .add_field(name="CAPS LOCK", value="You can ignore register and use bot with enabled CAPS LOCK", inline=False) \
@@ -573,6 +588,15 @@ async def extendedhelp(ctx):
         .add_field(name=f"*{commandPrefix}skip*",
                    value=f'Aliases are: "**{commandPrefix}SKIP**", "**{commandPrefix}s**", "**{commandPrefix}S**"',
                    inline=False) \
+        .add_field(name=f"*{commandPrefix}skipto*",
+                   value=f'Aliases are: "**{commandPrefix}SKIPTO**", "**{commandPrefix}st**", "**{commandPrefix}ST**"',
+                   inline=False) \
+        .add_field(name=f"*{commandPrefix}settings*",
+                   value=f'Aliases are: "**{commandPrefix}SETTINGS**", "**{commandPrefix}set**", '
+                         f'"**{commandPrefix}SET**"', inline=False) \
+        .add_field(name=f"*{commandPrefix}playlist*",
+                   value=f'Aliases are: "**{commandPrefix}PLAYLIST**", "**{commandPrefix}pl**", '
+                         f'"**{commandPrefix}PL**"', inline=False) \
         .add_field(name=f"*{commandPrefix}extendedhelp*",
                    value=f'Aliases are: "**{commandPrefix}EXTENDEDHELP**", "**{commandPrefix}eh**", '
                          f'"**{commandPrefix}EH**", "**{commandPrefix}aliases**", "**{commandPrefix}ALIASES**"',
@@ -675,7 +699,7 @@ async def on_ready():
         print("{} is connected to the following guild: {}. Guild id: {}".format(bot.user, guild.name, guild.id))
 
 
-# # todo join, rejoin, wait after everyone leaves, leave after no one mentions for some time || task ended
+# todo join, rejoin, wait after everyone leaves, leave after no one mentions for some time || task ended
 # @bot.event
 # async def on_voice_state_update(member, before, after):
 #     print("Channel {}\n {}\n {}\n".format(member, before, after))
@@ -706,5 +730,31 @@ async def on_member_update(before, after):
                 await after.edit(nick="Nickname dream is reserved by bot, please change yours role or nickname")
 
 
+async def clearDatabase():
+    guilds = []
+    await bot.wait_until_ready()
+
+    for guildid in bot.guilds:
+        guilds.append(guildid.id)
+
+    while not bot.is_closed():
+        try:
+            myCursor = mySqlDB.cursor()
+            sqlQuery = "SELECT DISTINCT guildId FROM playlists"
+            # values = (guild.id,)
+            myCursor.execute(sqlQuery)
+            records = myCursor.fetchall()
+            for guild in records:
+                if int(guild[0]) not in guilds:
+                    sqlQuery = "DELETE FROM playlists WHERE guildId=%s"
+                    values = (guild[0],)
+                    myCursor.execute(sqlQuery, values)
+                    mySqlDB.commit()
+            await asyncio.sleep(86400)
+        except Exception as e:
+            print("Clear database exc: ", e)
+
+
+bot.loop.create_task(clearDatabase())
 # bot.loop.create_task(update_stats())
 bot.run(token)
