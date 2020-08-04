@@ -19,23 +19,21 @@ token = open("token.txt", "r").read()
 ffmpegPathUrl = open("ffmpegPathUrl.txt", "r").read()
 creds = open("dbCreds.txt", "r").read().split(";")
 
-# todo add remove command to remove songs from queue (doing now)
-# todo make coroutine that checks every 24 hours if guild exists (done)
+# todo host bot (done)
+# todo add remove command to remove songs from queue (done)
+# todo fix skip and skipto bug with time (done)
 # todo launch on_message with asyncio coroutine that can notify functions when event(command invoked)
 # todo Track command messages with on_message to remove rubbish
-# todo redo 2 tries in skip command
-# todo add spotify player
+# todo redo 2 tries in skip command (done)
+# todo add spotify player [???]
 # todo add volume command [???]
-# todo check if guild still exist (for database solutions) (done)
 # todo loop (done) -> need to avoid global boolean variable loop
 # todo extract direct url to youtube from [query] and link it with music title
 # todo list a youtube playlist with choice indices on play command
 # todo fix url with youtube playlists (currently playing 1st song in playlist, need to play exact one)
 # todo create channel [???]
-# todo add description in settings command (done)
-# todo add description of new commands to help and extendedHelp (done)
 # todo set delete time for play command in settings
-# todo add to settings deleting all other commands which are unnecessary
+# todo add to settings deleting[delete_after] all other commands which are unnecessary
 # todo set pause timer in settings
 
 bot = commands.Bot(command_prefix=commandPrefix)
@@ -65,14 +63,6 @@ ffmpegOptions = {
     "before_options": f"-ss {skipToTime} -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 5",
     "options": "-vn"
 }
-
-mySqlDB = mysql.connector.connect(
-    host=creds[0],
-    user=creds[1],
-    password=creds[2],
-    database=creds[3]
-)
-
 
 # todo redo with using a database || reading previous messages (preferred to read)
 # async def update_stats():
@@ -106,13 +96,14 @@ async def join(ctx):
 
 @bot.command(pass_context=True, aliases=["LEAVE", "disconnect", "DISCONNECT"])
 async def leave(ctx):
-    global loop
+    global loop, skipToTime
     await ctx.channel.purge(limit=1)
     channel = ctx.message.author.voice.channel
     voice = get(ctx.bot.voice_clients)
     songQueue[ctx.guild], musicTitles[ctx.guild] = [], []
 
     if voice and voice.is_connected():
+        skipToTime = 0
         # await voice.disconnect()
         asyncio.run_coroutine_threadsafe(voice.disconnect(), bot.loop)
         # asyncio.run_coroutine_threadsafe(message[ctx.guild].delete(), bot.loop)
@@ -147,7 +138,7 @@ def search(author, url):
         else:
             info = ydl.extract_info(url, download=False)
 
-        embed = (discord.Embed(title="Currently playing: ", description=f"[{info['title']}]({info['webpage_url']})",
+        embed = (discord.Embed(title="Currently playing", description=f"[{info['title']}]({info['webpage_url']})",
                                color=embedColor)
                  .add_field(name="Duration", value=parseDuration(info["duration"]))
                  .add_field(name="Requested by", value=author)
@@ -164,8 +155,8 @@ def playNext(ctx):
     global skipToTime, songStartTime, loop
     endTime = songStartTime - datetime.now()
     end = skipToTime
-    ffmpegOptions[
-        "before_options"] = f"-ss {skipToTime} -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 5"
+    ffmpegOptions["before_options"] = f"-ss {skipToTime} -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 " \
+                                      f"-reconnect_delay_max 5"
     voice = get(bot.voice_clients, guild=ctx.guild)
     voice.is_paused()
 
@@ -179,7 +170,6 @@ def playNext(ctx):
 
     if len(songQueue[ctx.guild]) > 1 and len(musicTitles[ctx.guild]) > 1:
         del songQueue[ctx.guild][0], musicTitles[ctx.guild][0]
-
         if timeParse(songQueue[ctx.guild][0]["duration"]) <= end:
             skipToTime = 0
             voice.stop()
@@ -201,7 +191,7 @@ def playNext(ctx):
 
 @bot.command(pass_context=True, aliases=["PLAY", "p", "P"])
 async def play(ctx, *video: str):
-    global songStartTime
+    global songStartTime, skipToTime
 
     # await ctx.channel.purge(limit=1)
     channel = ctx.message.author.voice.channel
@@ -222,6 +212,7 @@ async def play(ctx, *video: str):
                                           source=songQueue[ctx.guild][0]["source"], **ffmpegOptions),
                    after=lambda e: playNext(ctx))
         voice.is_playing()
+        skipToTime = 0
     else:
         songQueue[ctx.guild].append(song)
         musicTitles[ctx.guild].append(video)
@@ -245,7 +236,7 @@ async def repeat(ctx):
             musicTitles[ctx.guild].insert(1, musicTitles[ctx.guild][0])
             voice.stop()
         else:
-            ctx.send("Nothing to repeat", delete_after=5)
+            await ctx.send("Nothing to repeat", delete_after=5)
 
         await ctx.send("Repeat requested by: {}".format(ctx.message.author), delete_after=5)
         await edit_message(ctx)
@@ -254,7 +245,6 @@ async def repeat(ctx):
         await ctx.send("You're not connected to the voice channel or nothing playing now", delete_after=5)
 
 
-# redo this completely
 @bot.command(pass_context=True, aliases=["LOOP", "l", "L"])
 async def loop(ctx):
     global loop
@@ -262,8 +252,10 @@ async def loop(ctx):
 
     if loop is True:
         loop = False
+        await ctx.send("**Loop disabled**")
     else:
         loop = True
+        await ctx.send("**Loop enabled**")
 
 
 @bot.command(pass_context=True, aliases=["PAUSE", "stop", "STOP", "resume", "RESUME"])
@@ -273,19 +265,22 @@ async def pause(ctx):
 
     if voice.is_connected():
         if voice.is_playing():
-            await ctx.send("Music paused", delete_after=5)
+            await ctx.send("**Music paused**", delete_after=5)
             voice.pause()
             voice.is_paused()
         else:
-            await ctx.send("Music resumed", delete_after=5)
+            await ctx.send("**Music resumed**", delete_after=5)
             voice.resume()
 
 
 def timeParse(time):
     seconds = 0
-    parts = time.split(":")
-    for i in range(len(parts)):
-        seconds += int(parts[-i - 1]) * (60 ** i)
+    try:
+        seconds = int(time)
+    except:
+        parts = time.split(":")
+        for i in range(len(parts)):
+            seconds += int(parts[-i - 1]) * (60 ** i)
     return seconds
 
 
@@ -297,24 +292,22 @@ async def skip(ctx, time="0"):
     voice = get(bot.voice_clients, guild=ctx.guild)
 
     try:
-        try:
-            if int(time) is 0:
-                await ctx.channel.purge(limit=1)
-                if voice.is_playing():
-                    await ctx.send("Track skipped", delete_after=5)
-                    skipToTime = 0
-                    voice.stop()
-                else:
-                    await ctx.send("Nothing is playing", delete_after=5)
+        if int(time) is 0:
+            await ctx.channel.purge(limit=1)
+            if voice.is_playing():
+                await ctx.send("Track skipped", delete_after=5)
+                skipToTime = 0
+                voice.stop()
             else:
-                skipped += timeParse(time) + abs(int(requestTime.total_seconds()))
-                await skipto(ctx, skipped)
-        except:
-            skipped += timeParse(time) + abs(int(requestTime.total_seconds()))
-            await skipto(ctx, skipped)
-    except Exception as e:
-        print("Skip exc: ", e)
-        await ctx.send("Please enter time in correct format", delete_after=5)
+                await ctx.send("Nothing is playing", delete_after=5)
+        else:
+            skipped += int(time) + abs(int(requestTime.total_seconds()))
+            skipToTime += skipped
+            await skipto(ctx, skipToTime)
+    except:
+        skipped += timeParse(time) + abs(int(requestTime.total_seconds()))
+        skipToTime += skipped
+        await skipto(ctx, skipToTime)
 
 
 @bot.command(pass_context=True, aliases=["SKIPTO", "st", "ST"])
@@ -332,14 +325,23 @@ async def skipto(ctx, time):
     if voice.is_playing():
         songQueue[ctx.guild].insert(1, songQueue[ctx.guild][0])
         musicTitles[ctx.guild].insert(1, musicTitles[ctx.guild][0])
-        skipToTime += timeParse(time)
+        skipToTime = timeParse(time)
         voice.stop()
     else:
         await ctx.send("Nothing to skip", delete_after=5)
 
-    await ctx.send(f"**Skipped to:** {parseDuration(skipToTime)}, **Requested by:** {ctx.message.author}",
+    await ctx.send(f"**Skipped to:** {parseDuration(skipToTime)} **Requested by:** {ctx.message.author}",
                    delete_after=25)
     await edit_message(ctx)
+
+
+@bot.command(pass_contex=True, aliases=["REMOVE", "rm", "RM"])
+async def remove(ctx, position: int):
+    if songQueue[ctx.guild][position] and musicTitles[ctx.guild][position]:
+        del songQueue[ctx.guild][position], musicTitles[ctx.guild][position]
+    else:
+        await ctx.send("No such music position in queue", delete_after=5)
+    asyncio.run_coroutine_threadsafe(edit_message(ctx), bot.loop)
 
 
 def chooseEmbedColor(color):
@@ -441,6 +443,13 @@ def getInfo(query):
 @bot.command(pass_context=True, aliases=["PLAYLIST", "pl", "PL"])
 async def playlist(ctx, task=None, title=None, *music):
     query = ""
+    mySqlDB = mysql.connector.connect(
+        host=creds[0],
+        user=creds[1],
+        password=creds[2],
+        database=creds[3]
+    )
+
     myCursor = mySqlDB.cursor()
 
     for i in music:
@@ -469,7 +478,7 @@ async def playlist(ctx, task=None, title=None, *music):
             for row in records:
                 await play(ctx, row[0])
         else:
-            await ctx.send("Please give which playlist to play")
+            await ctx.send("Please decide which playlist to play")
             await playlist(ctx, "show")
     elif task == "show":
         if not title:
@@ -490,7 +499,7 @@ async def playlist(ctx, task=None, title=None, *music):
             records = myCursor.fetchall()
             for row in records:
                 songs += f"{row[0]}\n"
-            embed = discord.Embed(title=f"{title} playlist music", description=f"{songs}", color=embedColor)
+            embed = discord.Embed(title=f"*{title}* playlist music", description=f"{songs}", color=embedColor)
             await ctx.send(embed=embed)
     elif task == "add":
         tags = ""
@@ -516,11 +525,11 @@ async def playlist(ctx, task=None, title=None, *music):
                 values = (ctx.guild.id, title, query, tags)
                 myCursor.execute(sqlQuery, values)
                 mySqlDB.commit()
-                await ctx.send(f"Song {query} has been added to playlist *{title}*")
+                await ctx.send(f"Song {query} has been added to playlist {title}")
             else:
-                await ctx.send(f"Max amount of songs are 20")
+                await ctx.send(f"Max amount of songs is 20")
         else:
-            await ctx.send("Max amount of playlists are 3")
+            await ctx.send("Max amount of playlists is 3")
     elif task == "delete":
         if not music:
             sqlQuery = "DELETE FROM playlists WHERE guildId=%s AND playlistTitle=%s LIMIT 1"
@@ -548,22 +557,24 @@ async def help(ctx):
         .add_field(name=f"*{commandPrefix}leave*", value="Bot will leave voice channel", inline=True) \
         .add_field(name=f"*{commandPrefix}skip*", value="Plays next track", inline=True) \
         .add_field(name=f"*{commandPrefix}play*", value="Request music with url or song title", inline=True) \
-        .add_field(name=f"*{commandPrefix}skip 1:20 or 20*", value="Skips next amount of time for 20 skips 20 seconds, "
-                                                                   "for 1:20 skips 1 minute 20 seconds, hh:mm:ss format"
+        .add_field(name=f"*{commandPrefix}skip 1:20 or 20*", value="Skips 1 minute 20 seconds of the song or 20 "
+                                                                   "seconds, hh:mm:ss format"
                    , inline=False) \
-        .add_field(name=f"*{commandPrefix}skipto 1:20 or 20*", value="Skips to exact time for 20 skips 20 seconds, for "
-                                                                     "1:20 skips 1 minute 20 seconds, hh:mm:ss format"
+        .add_field(name=f"*{commandPrefix}skipto 1:20 or 20*", value="Song starts playing at this exact time, e.g at 1 "
+                                                                     "minute 20 seconds or 20 seconds, hh:mm:ss format"
                    , inline=False) \
-        .add_field(name=f"*{commandPrefix}pause*", value="Pause music", inline=True) \
-        .add_field(name=f"*{commandPrefix}replay*", value="Repeat the track", inline=True) \
+        .add_field(name=f"*{commandPrefix}pause*", value="Pauses music", inline=True) \
+        .add_field(name=f"*{commandPrefix}replay*", value="Repeats the track", inline=True) \
         .add_field(name=f"*{commandPrefix}queue*", value="Shows queue", inline=True) \
-        .add_field(name=f"*{commandPrefix}settings", value=f"Shows all settings command") \
-        .add_field(name=f"*{commandPrefix}playlist", value=f"Shows all playlist command") \
-        .add_field(name=f"*{commandPrefix}extendedhelp*\t\t\t*{commandPrefix}aliases*",
+        .add_field(name=f"*{commandPrefix}settings*", value=f"Shows all settings command") \
+        .add_field(name=f"*{commandPrefix}playlist*", value=f"Shows all playlist command") \
+        .add_field(name=f"*{commandPrefix}extendedhelp*\t\t\t\t\t\t*{commandPrefix}aliases*",
                    value="Shows all aliases and some useful information", inline=False) \
+        .add_field(name=f"*{commandPrefix}remove*", value=f"Removes song from queue, with given position",
+                   inline=False) \
         .add_field(name="CAPS LOCK", value="You can ignore register and use bot with enabled CAPS LOCK", inline=False) \
-        .add_field(name="Playlists",
-                   value=f'Playlist are disabled, if you want to enable them, type "*{commandPrefix}settings*"',
+        .add_field(name="Youtube playlists",
+                   value=f'Currently are disabled',# , if you want to enable them, type "*{commandPrefix}settings*"'
                    inline=True)
     await ctx.send(embed=embed)
 
@@ -585,6 +596,9 @@ async def extendedhelp(ctx):
                    value=f'Aliases are: "**{commandPrefix}REPEAT**", "**{commandPrefix}r**", "**{commandPrefix}R**", '
                          f'"**{commandPrefix}again**", "**{commandPrefix}AGAIN**", "**{commandPrefix}replay**", '
                          f'"**{commandPrefix}REPLAY**"', inline=False) \
+        .add_field(name=f"*{commandPrefix}remove",
+                   value=f'Aliases are: "**{commandPrefix}REMOVE**", "**{commandPrefix}rm**", "**{commandPrefix}RM**"',
+                   inline=False) \
         .add_field(name=f"*{commandPrefix}skip*",
                    value=f'Aliases are: "**{commandPrefix}SKIP**", "**{commandPrefix}s**", "**{commandPrefix}S**"',
                    inline=False) \
@@ -601,15 +615,15 @@ async def extendedhelp(ctx):
                    value=f'Aliases are: "**{commandPrefix}EXTENDEDHELP**", "**{commandPrefix}eh**", '
                          f'"**{commandPrefix}EH**", "**{commandPrefix}aliases**", "**{commandPrefix}ALIASES**"',
                    inline=False) \
-        .add_field(name="Issues", value=f'If bot stacked at voice channel use command "**{commandPrefix}leave**" it '
-                                        f'will clear cache also you can disconnect him from voice chat and then test '
+        .add_field(name="Issues", value=f'If bot stuck at voice channel, use command "**{commandPrefix}leave**" it '
+                                        f'will clear cache also you can disconnect bot from voice chat and then test '
                                         f'with "**{commandPrefix}join**" command', inline=False)
     await ctx.send(embed=embed)
 
 
 @bot.command(pass_context=True)
 async def hello(ctx):
-    await ctx.send("Hi {}".format(ctx.author))
+    await ctx.send(f"Hi {ctx.author}. Your server id is {ctx.guild.id}")
 
 
 @bot.command(pass_context=True)
@@ -627,7 +641,7 @@ async def queue(ctx, page=1):
     if voice and voice.is_playing:
         playing = f"[{songQueue[ctx.guild][0]['title']}]({songQueue[ctx.guild][0]['webpage_url']})"
     else:
-        await ctx.send("Nothing playing now", delete_after=10)
+        await ctx.send("Nothing playing", delete_after=10)
 
     if len(songQueue[ctx.guild]) > 1:
         for i in songQueue[ctx.guild][1:]:
@@ -668,19 +682,20 @@ async def queue(ctx, page=1):
 @queue.error
 @settings.error
 @playlist.error
+@remove.error
 # @volume.error
 async def errorHandler(ctx, error):
     if isinstance(error, commands.CommandInvokeError):
         print(error)
         await ctx.send("You're not connected to the voice channel or nothing playing now", delete_after=5)
     elif isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send("Command requires argument", delete_after=5)
+        await ctx.send("Command requires additional info", delete_after=5)
     elif isinstance(error, commands.CommandNotFound):
         await ctx.send("No such command", delete_after=5)
     elif isinstance(error, commands.ConversionError):
-        await ctx.send("Sorry requested video can't be decoded, try one more time please", delete_after=5)
+        await ctx.send("Sorry, requested video can't be decoded, try one more time please", delete_after=5)
     elif isinstance(error, commands.TooManyArguments):
-        await ctx.send("To many arguments, please check if everything is okey", delete_after=5)
+        await ctx.send("Too many arguments, please check if everything is okay", delete_after=5)
     else:
         print("Error handler:", error)
 
@@ -718,6 +733,11 @@ async def on_ready():
 #     await member.dm_channel.send(f'Hi {member.name}, welcome to my Discord server!')
 
 
+# @bot.event
+# async def on_server_join():
+#     pass
+
+
 @bot.event
 async def on_member_update(before, after):
     nickname = after.nick
@@ -727,7 +747,7 @@ async def on_member_update(before, after):
             if lastNickname:
                 await after.edit(nick=lastNickname)
             else:
-                await after.edit(nick="Nickname dream is reserved by bot, please change yours role or nickname")
+                await after.edit(nick="Nickname dream is reserved by bot, please change your role or nickname")
 
 
 async def clearDatabase():
@@ -739,6 +759,13 @@ async def clearDatabase():
 
     while not bot.is_closed():
         try:
+            mySqlDB = mysql.connector.connect(
+                host=creds[0],
+                user=creds[1],
+                password=creds[2],
+                database=creds[3]
+            )
+
             myCursor = mySqlDB.cursor()
             sqlQuery = "SELECT DISTINCT guildId FROM playlists"
             # values = (guild.id,)
