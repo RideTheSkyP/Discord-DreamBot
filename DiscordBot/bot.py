@@ -19,14 +19,12 @@ token = open("token.txt", "r").read()
 ffmpegPathUrl = open("ffmpegPathUrl.txt", "r").read()
 creds = open("dbCreds.txt", "r").read().split(";")
 
-# todo host bot (done)
-# todo add remove command to remove songs from queue (done)
-# todo fix skip and skipto bug with time (done)
+# todo add bitrate to ydlOptions (done)
+# todo bot leaves from different servers, fix voice.disconnect and voice = get(bot.voice_clients, guild) (done)
 # todo launch on_message with asyncio coroutine that can notify functions when event(command invoked)
 # todo Track command messages with on_message to remove rubbish
-# todo redo 2 tries in skip command (done)
 # todo add spotify player [???]
-# todo add volume command [???]
+# todo add volume command (done)
 # todo loop (done) -> need to avoid global boolean variable loop
 # todo extract direct url to youtube from [query] and link it with music title
 # todo list a youtube playlist with choice indices on play command
@@ -36,23 +34,24 @@ creds = open("dbCreds.txt", "r").read().split(";")
 # todo add to settings deleting[delete_after] all other commands which are unnecessary
 # todo set pause timer in settings
 
-bot = commands.Bot(command_prefix=commandPrefix)
+bot = commands.Bot(command_prefix=commands.when_mentioned_or(commandPrefix))
 bot.remove_command("help")
 musicPath = "data/audio/cache/"
 playlistPath = "data/audio/playlist/"
 
 ydlOptions = {
-    "format": "bestaudio/best",
+    "format": "bestaudio",
     "noplaylist": True,
+    "bitrate": 192000,
     # "quite": True,
     "encoding": "utf-8",
     "default_search": "auto",
     "ignoreerrors": False,
     "no-check-certificate": True,
-    "socket_timeout": 5,
+    "socket_timeout": 30,
     "source_address": "0.0.0.0",
     "extractaudio": True,
-    "audioformat": "mp3",
+    # "audioformat": "mp3",
     "extract_flat": False,
     "simulate": True,
     "prefer_ffmpeg": True,
@@ -84,7 +83,7 @@ ffmpegOptions = {
 async def join(ctx):
     await ctx.channel.purge(limit=1)
     channel = ctx.message.author.voice.channel
-    voice = get(ctx.bot.voice_clients, guild=ctx.guild)
+    voice = get(bot.voice_clients, guild=ctx.guild)
 
     if voice and voice.is_connected():
         await voice.move_to(channel)
@@ -99,14 +98,13 @@ async def leave(ctx):
     global loop, skipToTime
     await ctx.channel.purge(limit=1)
     channel = ctx.message.author.voice.channel
-    voice = get(ctx.bot.voice_clients)
+    voice = get(bot.voice_clients, guild=ctx.guild)
     songQueue[ctx.guild], musicTitles[ctx.guild] = [], []
 
     if voice and voice.is_connected():
         skipToTime = 0
-        # await voice.disconnect()
         asyncio.run_coroutine_threadsafe(voice.disconnect(), bot.loop)
-        # asyncio.run_coroutine_threadsafe(message[ctx.guild].delete(), bot.loop)
+        asyncio.run_coroutine_threadsafe(message[ctx.guild].delete(), bot.loop)
         loop = False
         await ctx.send("Left {}".format(channel), delete_after=5)
 
@@ -183,7 +181,6 @@ def playNext(ctx):
                                           **ffmpegOptions), after=lambda e: playNext(ctx))
         voice.is_playing()
     else:
-        # asyncio.sleep(pauseTime)
         asyncio.run_coroutine_threadsafe(voice.disconnect(), bot.loop)
         asyncio.run_coroutine_threadsafe(message[ctx.guild].delete(), bot.loop)
         loop = False
@@ -552,7 +549,7 @@ async def help(ctx):
     await ctx.channel.purge(limit=1)
     embed = discord.Embed(title="Help", description="Commands", color=embedColor) \
         .add_field(name=f"*{commandPrefix}hello*", value="Greets the user", inline=True) \
-        .add_field(name=f"*{commandPrefix}users*", value="Prints number of users", inline=True) \
+        .add_field(name=f"*{commandPrefix}users*", value="Prints number of users on server", inline=True) \
         .add_field(name=f"*{commandPrefix}join*", value="Bot will join voice channel", inline=True) \
         .add_field(name=f"*{commandPrefix}leave*", value="Bot will leave voice channel", inline=True) \
         .add_field(name=f"*{commandPrefix}skip*", value="Plays next track", inline=True) \
@@ -566,8 +563,8 @@ async def help(ctx):
         .add_field(name=f"*{commandPrefix}pause*", value="Pauses music", inline=True) \
         .add_field(name=f"*{commandPrefix}replay*", value="Repeats the track", inline=True) \
         .add_field(name=f"*{commandPrefix}queue*", value="Shows queue", inline=True) \
-        .add_field(name=f"*{commandPrefix}settings*", value=f"Shows all settings command") \
-        .add_field(name=f"*{commandPrefix}playlist*", value=f"Shows all playlist command") \
+        .add_field(name=f"*{commandPrefix}settings*", value=f"Shows all settings commands") \
+        .add_field(name=f"*{commandPrefix}playlist*", value=f"Shows all playlist commands") \
         .add_field(name=f"*{commandPrefix}extendedhelp*\t\t\t\t\t\t*{commandPrefix}aliases*",
                    value="Shows all aliases and some useful information", inline=False) \
         .add_field(name=f"*{commandPrefix}remove*", value=f"Removes song from queue, with given position",
@@ -665,12 +662,13 @@ async def queue(ctx, page=1):
     await ctx.send(embed=embed)
 
 
-# @bot.command(pass_context=True)
-# async def volume(ctx, volume: int):
-#     await ctx.channel.purge(limit=1)
-#     voice = get(bot.voice_clients, guild=ctx.guild)
-#     voice.volume = volume / 100
-#     await ctx.send(f"Volume changed to {volume}%", delete_after=5)
+@bot.command(pass_context=True, aliases=["VOLUME", "vol", "VOL"])
+async def volume(ctx, volume: int):
+    await ctx.channel.purge(limit=1)
+    voice = get(bot.voice_clients, guild=ctx.guild)
+    voice.source = discord.PCMVolumeTransformer(voice.source)
+    voice.source.volume = volume / 100
+    await ctx.send(f"Volume changed to {volume}%", delete_after=15)
 
 
 @play.error
@@ -683,7 +681,7 @@ async def queue(ctx, page=1):
 @settings.error
 @playlist.error
 @remove.error
-# @volume.error
+@volume.error
 async def errorHandler(ctx, error):
     if isinstance(error, commands.CommandInvokeError):
         print(error)
@@ -696,6 +694,8 @@ async def errorHandler(ctx, error):
         await ctx.send("Sorry, requested video can't be decoded, try one more time please", delete_after=5)
     elif isinstance(error, commands.TooManyArguments):
         await ctx.send("Too many arguments, please check if everything is okay", delete_after=5)
+    elif isinstance(error, ValueError):
+        await ctx.send("Please enter correct value", delete_after=5)
     else:
         print("Error handler:", error)
 
