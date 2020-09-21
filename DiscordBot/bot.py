@@ -19,12 +19,9 @@ token = open("token.txt", "r").read()
 ffmpegPathUrl = open("ffmpegPathUrl.txt", "r").read()
 creds = open("dbCreds.txt", "r").read().split(";")
 
-# todo add bitrate to ydlOptions (done)
-# todo bot leaves from different servers, fix voice.disconnect and voice = get(bot.voice_clients, guild) (done)
 # todo launch on_message with asyncio coroutine that can notify functions when event(command invoked)
 # todo Track command messages with on_message to remove rubbish
 # todo add spotify player [???]
-# todo add volume command (done)
 # todo loop (done) -> need to avoid global boolean variable loop
 # todo extract direct url to youtube from [query] and link it with music title
 # todo list a youtube playlist with choice indices on play command
@@ -48,7 +45,7 @@ ydlOptions = {
     "default_search": "auto",
     "ignoreerrors": False,
     "no-check-certificate": True,
-    "socket_timeout": 30,
+    "socket_timeout": 10,
     "source_address": "0.0.0.0",
     "extractaudio": True,
     # "audioformat": "mp3",
@@ -129,6 +126,7 @@ async def edit_message(ctx):
 
 def search(author, url):
     with youtube_dl.YoutubeDL(ydlOptions) as ydl:
+        ydl.cache.remove()
         try:
             requests.get(url)
         except:
@@ -343,6 +341,7 @@ async def remove(ctx, position: int):
 
 def chooseEmbedColor(color):
     global embedColor
+    color = color.lower()
     embedTitle = f"Your new discord embeds color is *{color}*"
 
     if color == "blue":
@@ -394,6 +393,9 @@ async def settings(ctx, task=None, *args):
     await ctx.channel.purge(limit=1)
     global pauseTime, commandPrefix, embedColor
 
+    if task:
+        task = task.lower()
+
     if task is None:
         embed = discord.Embed(title=f"Settings command description", description=f"Command pattern is\n"
                                                                                  f"**{commandPrefix}settings [task]**"
@@ -404,14 +406,14 @@ async def settings(ctx, task=None, *args):
                        inline=False) \
             .add_field(name=f"{commandPrefix}settings embedColor [color]", value=f"Sets given color as embed color")
         await ctx.send(embed=embed)
-    elif task == "commandPrefix":
+    elif task == "commandprefix":
         if not args:
             await ctx.send("Please give a prefix after [commandPrefix]", delete_after=5)
         else:
             commandPrefix = args[0]
             bot.command_prefix = commandPrefix
             await ctx.send(f"Your new command prefix is {args[0]}")
-    elif task == "embedColor":
+    elif task == "embedcolor":
         if not args:
             await ctx.send(embed=discord.Embed(title=f"Possible colors are",
                                                description="*blue\npurple\nred\norange\ngreen\nmagenta\nteal\ngold*\n"
@@ -440,6 +442,10 @@ def getInfo(query):
 @bot.command(pass_context=True, aliases=["PLAYLIST", "pl", "PL"])
 async def playlist(ctx, task=None, title=None, *music):
     query = ""
+
+    if task:
+        task = task.lower()
+
     mySqlDB = mysql.connector.connect(
         host=creds[0],
         user=creds[1],
