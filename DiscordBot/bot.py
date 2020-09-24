@@ -5,7 +5,6 @@ import youtube_dl
 import discord
 from discord.ext import commands
 from discord.utils import get
-import shutil
 import mysql.connector
 
 joined, messages, guildId, songIterator, skipToTime, songStartTime, pauseTime = 0, 0, 0, 0, 0, 0, 0
@@ -19,8 +18,9 @@ token = open("token.txt", "r").read()
 ffmpegPathUrl = open("ffmpegPathUrl.txt", "r").read()
 creds = open("dbCreds.txt", "r").read().split(";")
 
+# todo fix issue when music cannot be added to playlist [done]
 # todo launch on_message with asyncio coroutine that can notify functions when event(command invoked)
-# todo Track command messages with on_message to remove rubbish
+# todo track command messages with on_message to remove rubbish
 # todo add spotify player [???]
 # todo loop (done) -> need to avoid global boolean variable loop
 # todo extract direct url to youtube from [query] and link it with music title
@@ -520,9 +520,10 @@ async def playlist(ctx, task=None, title=None, *music):
             if len(songsAmount) < 20:
                 info = getInfo(query)
 
-                for i in info["tags"]:
-                    if len(tags) < 200:
-                        tags += f"{i} "
+                if info["tags"] is not None:
+                    for i in info["tags"]:
+                        if len(tags) < 200:
+                            tags += f"{i} "
 
                 sqlQuery = "INSERT INTO playlists (guildId, playlistTitle, query, genre) VALUES (%s, %s, %s, %s)"
                 values = (ctx.guild.id, title, query, tags)
@@ -561,8 +562,7 @@ async def help(ctx):
         .add_field(name=f"*{commandPrefix}skip*", value="Plays next track", inline=True) \
         .add_field(name=f"*{commandPrefix}play*", value="Request music with url or song title", inline=True) \
         .add_field(name=f"*{commandPrefix}skip 1:20 or 20*", value="Skips 1 minute 20 seconds of the song or 20 "
-                                                                   "seconds, hh:mm:ss format"
-                   , inline=False) \
+                                                                   "seconds, hh:mm:ss format", inline=False) \
         .add_field(name=f"*{commandPrefix}skipto 1:20 or 20*", value="Song starts playing at this exact time, e.g at 1 "
                                                                      "minute 20 seconds or 20 seconds, hh:mm:ss format"
                    , inline=False) \
@@ -717,7 +717,7 @@ async def on_ready():
     await bot.change_presence(activity=activity)
 
     for guild in bot.guilds:
-        print("{} is connected to the following guild: {}. Guild id: {}".format(bot.user, guild.name, guild.id))
+        print(f"{bot.user} is connected to the following guild: {guild.name}. Guild id: {guild.id}")
 
 
 # todo join, rejoin, wait after everyone leaves, leave after no one mentions for some time || task ended
