@@ -6,6 +6,7 @@ import discord
 from discord.ext import commands
 from discord.utils import get
 import mysql.connector
+from timeManager import TimeManager
 
 joined, messages, guildId, songIterator, skipToTime, songStartTime, pauseTime = 0, 0, 0, 0, 0, 0, 0
 commandPrefix = "."
@@ -16,7 +17,13 @@ embedColor = discord.Color.purple()
 
 token = open("token.txt", "r").read()
 ffmpegPathUrl = open("ffmpegPathUrl.txt", "r").read()
-creds = open("dbCreds.txt", "r").read().split(";")
+dbCreds = open("dbCreds.txt", "r").read().split(";")
+
+# Create class method
+# def readCreds():
+#     token = open("token.txt", "r").read()
+#     ffmpegPathUrl = open("ffmpegPathUrl.txt", "r").read()
+#     dbCreds = open("dbCreds.txt", "r").read().split(";")
 
 # todo fix issue when music cannot be added to playlist [done]
 # todo launch on_message with asyncio coroutine that can notify functions when event(command invoked)
@@ -106,13 +113,6 @@ async def leave(ctx):
         await ctx.send("Left {}".format(channel), delete_after=5)
 
 
-def parseDuration(duration: int):
-    m, s = divmod(duration, 60)
-    h, m = divmod(m, 60)
-    return f"{h:02d}:{m:02d}:{s:02d}"
-
-
-# Queue or queued
 async def edit_message(ctx):
     embed = songQueue[ctx.guild][0]["embed"]
     content = "\n".join([f"**{songQueue[ctx.guild].index(i)}:**"
@@ -136,7 +136,7 @@ def search(author, url):
 
         embed = (discord.Embed(title="Currently playing", description=f"[{info['title']}]({info['webpage_url']})",
                                color=embedColor)
-                 .add_field(name="Duration", value=parseDuration(info["duration"]))
+                 .add_field(name="Duration", value=TimeManager.parseDuration(info["duration"]))
                  .add_field(name="Requested by", value=author)
                  .add_field(name="Uploader", value=f"[{info['uploader']}]({info['channel_url']})")
                  .add_field(name="Queue", value="No song queued")
@@ -144,7 +144,7 @@ def search(author, url):
 
         return {"embed": embed, "source": info["formats"][0]["url"], "title": info["title"],
                 "webpage_url": info['webpage_url'], "thumbnail": info["thumbnail"],
-                "duration": parseDuration(info["duration"])}
+                "duration": TimeManager.parseDuration(info["duration"])}
 
 
 def playNext(ctx):
@@ -166,7 +166,7 @@ def playNext(ctx):
 
     if len(songQueue[ctx.guild]) > 1 and len(musicTitles[ctx.guild]) > 1:
         del songQueue[ctx.guild][0], musicTitles[ctx.guild][0]
-        if timeParse(songQueue[ctx.guild][0]["duration"]) <= end:
+        if TimeManager.timeParse(songQueue[ctx.guild][0]["duration"]) <= end:
             skipToTime = 0
             voice.stop()
 
@@ -253,7 +253,7 @@ async def loop(ctx):
         await ctx.send("**Loop enabled**")
 
 
-@bot.command(pass_context=True, aliases=["PAUSE", "stop", "STOP", "resume", "RESUME"])
+@bot.command(pass_context=True, aliases=["PAUSE", "stop", "STOP", "resume", "RESUME", "shutup", "SHUTUP"])
 async def pause(ctx):
     await ctx.channel.purge(limit=1)
     voice = get(bot.voice_clients, guild=ctx.guild)
@@ -266,17 +266,6 @@ async def pause(ctx):
         else:
             await ctx.send("**Music resumed**", delete_after=5)
             voice.resume()
-
-
-def timeParse(time):
-    seconds = 0
-    try:
-        seconds = int(time)
-    except:
-        parts = time.split(":")
-        for i in range(len(parts)):
-            seconds += int(parts[-i - 1]) * (60 ** i)
-    return seconds
 
 
 @bot.command(pass_context=True, aliases=["SKIP", "s", "S"])
@@ -300,7 +289,7 @@ async def skip(ctx, time="0"):
             skipToTime += skipped
             await skipto(ctx, skipToTime)
     except:
-        skipped += timeParse(time) + abs(int(requestTime.total_seconds()))
+        skipped += TimeManager.timeParse(time) + abs(int(requestTime.total_seconds()))
         skipToTime += skipped
         await skipto(ctx, skipToTime)
 
@@ -320,12 +309,12 @@ async def skipto(ctx, time):
     if voice.is_playing():
         songQueue[ctx.guild].insert(1, songQueue[ctx.guild][0])
         musicTitles[ctx.guild].insert(1, musicTitles[ctx.guild][0])
-        skipToTime = timeParse(time)
+        skipToTime = TimeManager.timeParse(time)
         voice.stop()
     else:
         await ctx.send("Nothing to skip", delete_after=5)
 
-    await ctx.send(f"**Skipped to:** {parseDuration(skipToTime)} **Requested by:** {ctx.message.author}",
+    await ctx.send(f"**Skipped to:** {TimeManager.parseDuration(skipToTime)} **Requested by:** {ctx.message.author}",
                    delete_after=25)
     await edit_message(ctx)
 
@@ -344,47 +333,56 @@ def chooseEmbedColor(color):
     color = color.lower()
     embedTitle = f"Your new discord embeds color is *{color}*"
 
-    if color == "blue":
-        embedColor = discord.Color.blue()
-    elif color == "purple":
-        embedColor = discord.Color.purple()
-    elif color == "blue-purple":
-        embedColor = discord.Color.blurple()
-    elif color == "dark-blue":
-        embedColor = discord.Color.dark_blue()
-    elif color == "dark-gold":
-        embedColor = discord.Color.dark_gold()
-    elif color == "dark-green":
-        embedColor = discord.Color.dark_green()
-    elif color == "dark-grey":
-        embedColor = discord.Color.dark_grey()
-    elif color == "dark-magenta":
-        embedColor = discord.Color.dark_magenta()
-    elif color == "dark-orange":
-        embedColor = discord.Color.dark_orange()
-    elif color == "dark-purple":
-        embedColor = discord.Color.dark_purple()
-    elif color == "dark-red":
-        embedColor = discord.Color.dark_red()
-    elif color == "dark-teal":
-        embedColor = discord.Color.dark_teal()
-    elif color == "gold":
-        embedColor = discord.Color.gold()
-    elif color == "green":
-        embedColor = discord.Color.green()
-    elif color == "light-grey":
-        embedColor = discord.Color.light_grey()
-    elif color == "magenta":
-        embedColor = discord.Color.magenta()
-    elif color == "orange":
-        embedColor = discord.Color.orange()
-    elif color == "red":
-        embedColor = discord.Color.red()
-    elif color == "teal":
-        embedColor = discord.Color.teal()
-    else:
-        embedTitle = f"No such color is presented, please choose something from *{commandPrefix}settings " \
-                     f"embedColor*\nYour current embed color wasn't changed"
+    colorDict = {"blue": discord.Color.blue(), "purple": discord.Color.purple(), "blue-purple": discord.Color.blurple(),
+                 "dark-blue": discord.Color.dark_blue(), "dark-gold": discord.Color.dark_gold(),
+                 "dark-green": discord.Color.dark_green(), "dark-grey": discord.Color.dark_grey(),
+                 "dark-magenta": discord.Color.dark_magenta(), "dark-orange": discord.Color.dark_orange(),
+                 "dark-purple": discord.Color.dark_purple(), "dark-red": discord.Color.dark_red(),
+                 "dark-teal": discord.Color.dark_teal(), "gold": discord.Color.gold(), "green": discord.Color.green(),
+                 "light-grey": discord.Color.light_grey(), "magenta": discord.Color.magenta(),
+                 "orange": discord.Color.orange(), "red": discord.Color.red(), "teal": discord.Color.teal()}
+    embedColor = colorDict[color]
+    # if color == "blue":
+    #     embedColor = discord.Color.blue()
+    # elif color == "purple":
+    #     embedColor = discord.Color.purple()
+    # elif color == "blue-purple":
+    #     embedColor = discord.Color.blurple()
+    # elif color == "dark-blue":
+    #     embedColor = discord.Color.dark_blue()
+    # elif color == "dark-gold":
+    #     embedColor = discord.Color.dark_gold()
+    # elif color == "dark-green":
+    #     embedColor = discord.Color.dark_green()
+    # elif color == "dark-grey":
+    #     embedColor = discord.Color.dark_grey()
+    # elif color == "dark-magenta":
+    #     embedColor = discord.Color.dark_magenta()
+    # elif color == "dark-orange":
+    #     embedColor = discord.Color.dark_orange()
+    # elif color == "dark-purple":
+    #     embedColor = discord.Color.dark_purple()
+    # elif color == "dark-red":
+    #     embedColor = discord.Color.dark_red()
+    # elif color == "dark-teal":
+    #     embedColor = discord.Color.dark_teal()
+    # elif color == "gold":
+    #     embedColor = discord.Color.gold()
+    # elif color == "green":
+    #     embedColor = discord.Color.green()
+    # elif color == "light-grey":
+    #     embedColor = discord.Color.light_grey()
+    # elif color == "magenta":
+    #     embedColor = discord.Color.magenta()
+    # elif color == "orange":
+    #     embedColor = discord.Color.orange()
+    # elif color == "red":
+    #     embedColor = discord.Color.red()
+    # elif color == "teal":
+    #     embedColor = discord.Color.teal()
+    # else:
+    #     embedTitle = f"No such color is presented, please choose something from *{commandPrefix}settings " \
+    #                  f"embedColor*\nYour current embed color wasn't changed"
     return embedTitle
 
 
@@ -447,10 +445,10 @@ async def playlist(ctx, task=None, title=None, *music):
         task = task.lower()
 
     mySqlDB = mysql.connector.connect(
-        host=creds[0],
-        user=creds[1],
-        password=creds[2],
-        database=creds[3]
+        host=dbCreds[0],
+        user=dbCreds[1],
+        password=dbCreds[2],
+        database=dbCreds[3]
     )
 
     myCursor = mySqlDB.cursor()
@@ -766,10 +764,10 @@ async def clearDatabase():
     while not bot.is_closed():
         try:
             mySqlDB = mysql.connector.connect(
-                host=creds[0],
-                user=creds[1],
-                password=creds[2],
-                database=creds[3]
+                host=dbCreds[0],
+                user=dbCreds[1],
+                password=dbCreds[2],
+                database=dbCreds[3]
             )
 
             myCursor = mySqlDB.cursor()
@@ -788,6 +786,7 @@ async def clearDatabase():
             print("Clear database exc: ", e)
 
 
-bot.loop.create_task(clearDatabase())
-# bot.loop.create_task(update_stats())
-bot.run(token)
+if __name__ == "__main__":
+    bot.loop.create_task(clearDatabase())
+    # bot.loop.create_task(update_stats())
+    bot.run(token)
