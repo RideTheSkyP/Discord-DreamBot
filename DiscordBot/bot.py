@@ -7,6 +7,7 @@ from discord.ext import commands
 from discord.utils import get
 import mysql.connector
 from timeManager import TimeManager
+from player import Player
 
 joined, messages, guildId, songIterator, skipToTime, songStartTime, pauseTime = 0, 0, 0, 0, 0, 0, 0
 commandPrefix = "."
@@ -25,7 +26,6 @@ dbCreds = open("dbCreds.txt", "r").read().split(";")
 #     ffmpegPathUrl = open("ffmpegPathUrl.txt", "r").read()
 #     dbCreds = open("dbCreds.txt", "r").read().split(";")
 
-# todo fix issue when music cannot be added to playlist [done]
 # todo launch on_message with asyncio coroutine that can notify functions when event(command invoked)
 # todo track command messages with on_message to remove rubbish
 # todo add spotify player [???]
@@ -126,7 +126,6 @@ async def edit_message(ctx):
 
 def search(author, url):
     with youtube_dl.YoutubeDL(ydlOptions) as ydl:
-        ydl.cache.remove()
         try:
             requests.get(url)
         except:
@@ -147,51 +146,12 @@ def search(author, url):
                 "duration": TimeManager.parseDuration(info["duration"])}
 
 
-def playNext(ctx):
-    global skipToTime, songStartTime, loop
-    endTime = songStartTime - datetime.now()
-    end = skipToTime
-    ffmpegOptions["before_options"] = f"-ss {skipToTime} -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 " \
-                                      f"-reconnect_delay_max 5"
-    voice = get(bot.voice_clients, guild=ctx.guild)
-    voice.is_paused()
-
-    if loop is True:
-        songQueue[ctx.guild].append(songQueue[ctx.guild][0])
-        musicTitles[ctx.guild].append(musicTitles[ctx.guild][0])
-    else:
-        pass
-
-    end += abs(int(endTime.total_seconds()))
-
-    if len(songQueue[ctx.guild]) > 1 and len(musicTitles[ctx.guild]) > 1:
-        del songQueue[ctx.guild][0], musicTitles[ctx.guild][0]
-        if TimeManager.timeParse(songQueue[ctx.guild][0]["duration"]) <= end:
-            skipToTime = 0
-            voice.stop()
-
-        song = search(ctx.author.mention, musicTitles[ctx.guild][0])
-        songQueue[ctx.guild][0] = song
-        asyncio.run_coroutine_threadsafe(edit_message(ctx), bot.loop)
-        songStartTime = datetime.now()
-
-        voice.play(discord.FFmpegPCMAudio(executable=ffmpegPathUrl, source=songQueue[ctx.guild][0]["source"],
-                                          **ffmpegOptions), after=lambda e: playNext(ctx))
-        voice.is_playing()
-    else:
-        asyncio.run_coroutine_threadsafe(voice.disconnect(), bot.loop)
-        asyncio.run_coroutine_threadsafe(message[ctx.guild].delete(), bot.loop)
-        loop = False
-
-
 @bot.command(pass_context=True, aliases=["PLAY", "p", "P"])
 async def play(ctx, *video: str):
     global songStartTime, skipToTime
-
-    # await ctx.channel.purge(limit=1)
+    song = search(ctx.author.mention, video)
     channel = ctx.message.author.voice.channel
     voice = get(bot.voice_clients, guild=ctx.guild)
-    song = search(ctx.author.mention, video)
 
     if voice and voice.is_connected():
         await voice.move_to(channel)
@@ -199,19 +159,22 @@ async def play(ctx, *video: str):
         voice = await channel.connect()
 
     if not voice.is_playing():
-        songQueue[ctx.guild] = [song]
+        self.songQueue[ctx.guild] = [song]
         musicTitles[ctx.guild] = [video]
         message[ctx.guild] = await ctx.send(embed=song["embed"])
         songStartTime = datetime.now()
-        voice.play(discord.FFmpegPCMAudio(executable=ffmpegPathUrl,
-                                          source=songQueue[ctx.guild][0]["source"], **ffmpegOptions),
-                   after=lambda e: playNext(ctx))
-        voice.is_playing()
+        # voice.play(discord.FFmpegPCMAudio(executable=ffmpegPathUrl,
+        #                                   source=self.songQueue[ctx.guild][0]["source"], **ffmpegOptions),
+        #            after=lambda e: playNext(ctx))
+        # voice.is_playing()
+        playSong = songQueue[ctx.guild][0]["source"]
+        await Player.play(voice, playSong)
         skipToTime = 0
     else:
         songQueue[ctx.guild].append(song)
         musicTitles[ctx.guild].append(video)
         await edit_message(ctx)
+
 
 
 @bot.command(pass_context=True, aliases=["REPEAT", "r", "R", "again", "AGAIN", "replay", "REPLAY"])
@@ -332,7 +295,6 @@ def chooseEmbedColor(color):
     global embedColor
     color = color.lower()
     embedTitle = f"Your new discord embeds color is *{color}*"
-
     colorDict = {"blue": discord.Color.blue(), "purple": discord.Color.purple(), "blue-purple": discord.Color.blurple(),
                  "dark-blue": discord.Color.dark_blue(), "dark-gold": discord.Color.dark_gold(),
                  "dark-green": discord.Color.dark_green(), "dark-grey": discord.Color.dark_grey(),
@@ -340,49 +302,14 @@ def chooseEmbedColor(color):
                  "dark-purple": discord.Color.dark_purple(), "dark-red": discord.Color.dark_red(),
                  "dark-teal": discord.Color.dark_teal(), "gold": discord.Color.gold(), "green": discord.Color.green(),
                  "light-grey": discord.Color.light_grey(), "magenta": discord.Color.magenta(),
-                 "orange": discord.Color.orange(), "red": discord.Color.red(), "teal": discord.Color.teal()}
-    embedColor = colorDict[color]
-    # if color == "blue":
-    #     embedColor = discord.Color.blue()
-    # elif color == "purple":
-    #     embedColor = discord.Color.purple()
-    # elif color == "blue-purple":
-    #     embedColor = discord.Color.blurple()
-    # elif color == "dark-blue":
-    #     embedColor = discord.Color.dark_blue()
-    # elif color == "dark-gold":
-    #     embedColor = discord.Color.dark_gold()
-    # elif color == "dark-green":
-    #     embedColor = discord.Color.dark_green()
-    # elif color == "dark-grey":
-    #     embedColor = discord.Color.dark_grey()
-    # elif color == "dark-magenta":
-    #     embedColor = discord.Color.dark_magenta()
-    # elif color == "dark-orange":
-    #     embedColor = discord.Color.dark_orange()
-    # elif color == "dark-purple":
-    #     embedColor = discord.Color.dark_purple()
-    # elif color == "dark-red":
-    #     embedColor = discord.Color.dark_red()
-    # elif color == "dark-teal":
-    #     embedColor = discord.Color.dark_teal()
-    # elif color == "gold":
-    #     embedColor = discord.Color.gold()
-    # elif color == "green":
-    #     embedColor = discord.Color.green()
-    # elif color == "light-grey":
-    #     embedColor = discord.Color.light_grey()
-    # elif color == "magenta":
-    #     embedColor = discord.Color.magenta()
-    # elif color == "orange":
-    #     embedColor = discord.Color.orange()
-    # elif color == "red":
-    #     embedColor = discord.Color.red()
-    # elif color == "teal":
-    #     embedColor = discord.Color.teal()
-    # else:
-    #     embedTitle = f"No such color is presented, please choose something from *{commandPrefix}settings " \
-    #                  f"embedColor*\nYour current embed color wasn't changed"
+                 "orange": discord.Color.orange(), "red": discord.Color.red(), "teal": discord.Color.teal(),
+                 "dark-theme": discord.Color.dark_theme()}
+
+    if color in colorDict:
+        embedColor = colorDict[color]
+    else:
+        embedTitle = f"No such color is presented, please choose something from *{commandPrefix}settings " \
+                     f"embedColor*\nYour current embed color wasn't changed"
     return embedTitle
 
 
@@ -415,13 +342,14 @@ async def settings(ctx, task=None, *args):
         if not args:
             await ctx.send(embed=discord.Embed(title=f"Possible colors are",
                                                description="*blue\npurple\nred\norange\ngreen\nmagenta\nteal\ngold*\n"
-                                                           f"*blue-purple\nlight-grey\ndark-blue\ndark-gold\n"
-                                                           f"dark-green\ndark-purple\ndark-grey*\n*dark-magenta\n"
-                                                           f"dark-orange\ndark-red\ndark-teal*\nUse command "
-                                                           f"__*{commandPrefix}settings embedColor dark-purple*__ "
-                                                           f" to set embeds color", color=embedColor))
+                                                           f"*blue-purple\nlight-grey\ndark-blue\ndark-gold*\n"
+                                                           f"*dark-green\ndark-purple\ndark-grey\n*dark-magenta*\n"
+                                                           f"*dark-orange\ndark-red\ndark-teal\ndark-theme*\n"
+                                                           f"Use command __*{commandPrefix}settings embedColor* "
+                                                           f"*dark-purple*__ to set embeds color", color=embedColor))
         else:
-            embedTitle = chooseEmbedColor(args[0])
+            color = args[0].lower()
+            embedTitle = chooseEmbedColor(color)
             embed = discord.Embed(title=embedTitle, color=embedColor)
             await ctx.send(embed=embed)
 
@@ -453,8 +381,8 @@ async def playlist(ctx, task=None, title=None, *music):
 
     myCursor = mySqlDB.cursor()
 
-    for i in music:
-        query += f"{i} "
+    for word in music:
+        query += f"{word} "
 
     if not task:
         embed = discord.Embed(title="Playlist commands description",
@@ -519,9 +447,9 @@ async def playlist(ctx, task=None, title=None, *music):
                 info = getInfo(query)
 
                 if info["tags"] is not None:
-                    for i in info["tags"]:
+                    for tag in info["tags"]:
                         if len(tags) < 200:
-                            tags += f"{i} "
+                            tags += f"{tag} "
 
                 sqlQuery = "INSERT INTO playlists (guildId, playlistTitle, query, genre) VALUES (%s, %s, %s, %s)"
                 values = (ctx.guild.id, title, query, tags)
@@ -597,7 +525,7 @@ async def extendedhelp(ctx):
                    value=f'Aliases are: "**{commandPrefix}REPEAT**", "**{commandPrefix}r**", "**{commandPrefix}R**", '
                          f'"**{commandPrefix}again**", "**{commandPrefix}AGAIN**", "**{commandPrefix}replay**", '
                          f'"**{commandPrefix}REPLAY**"', inline=False) \
-        .add_field(name=f"*{commandPrefix}remove",
+        .add_field(name=f"*{commandPrefix}remove*",
                    value=f'Aliases are: "**{commandPrefix}REMOVE**", "**{commandPrefix}rm**", "**{commandPrefix}RM**"',
                    inline=False) \
         .add_field(name=f"*{commandPrefix}skip*",

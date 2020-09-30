@@ -7,13 +7,15 @@ class TimeManager:
         self.end = 0
         self.skipped = 0
 
-    def parseDuration(self, duration):
+    @staticmethod
+    def parseDuration(duration):
         duration = int(duration)
         m, s = divmod(duration, 60)
         h, m = divmod(m, 60)
         return f"{h:02d}:{m:02d}:{s:02d}"
 
-    def timeParse(self, time):
+    @staticmethod
+    def timeParse(time):
         seconds = 0
         try:
             seconds = int(time)
