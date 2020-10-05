@@ -21,17 +21,14 @@ token = open("token.txt", "r").read()
 # todo launch on_message with asyncio coroutine that can notify functions when event(command invoked)
 # todo track command messages with on_message to remove rubbish
 # todo add spotify player [???]
-# todo loop (done) -> need to avoid global boolean variable loop
+# todo loop (done) -> need to avoid global boolean variable loop (done)
 # todo extract direct url to youtube from [query] and link it with music title
 # todo list a youtube playlist with choice indices on play command
 # todo fix url with youtube playlists (currently playing 1st song in playlist, need to play exact one)
 # todo create channel [???]
-# todo set delete time for play command in settings
-# todo add to settings deleting[delete_after] all other commands which are unnecessary
+# todo add to settings deleting[delete_after] all other commands which are unnecessary (done)
 # todo set pause timer in settings
 
-# musicPath = "data/audio/cache/"
-# playlistPath = "data/audio/playlist/"
 
 # todo redo with using a database || reading previous messages (preferred to read)
 # async def update_stats():
@@ -58,7 +55,7 @@ class Music(commands.Cog):
         self.songIterator = 0
         self.skipToTime = 0
         self.songStartTime = 0
-        self.pauseTime = 0
+        self.repeatDeleteAfter, self.pauseDeleteAfter, self.skipDeleteAfter, self.volumeDeleteAfter = 5, 5, 25, 15
         self.loop = False
         self.songQueue = {}
         self.musicTitles = {}
@@ -98,24 +95,23 @@ class Music(commands.Cog):
         if voice and voice.is_connected():
             await voice.move_to(channel)
         else:
-            voice = await channel.connect()
+            await channel.connect()
 
-        await ctx.send("Joined {}".format(channel), delete_after=5)
+        await ctx.send(f"Joined {channel}", delete_after=5)
 
     @commands.command(pass_context=True, aliases=["LEAVE", "disconnect", "DISCONNECT"])
     async def leave(self, ctx):
-        global loop, skipToTime
         await ctx.channel.purge(limit=1)
         channel = ctx.message.author.voice.channel
         voice = get(bot.voice_clients, guild=ctx.guild)
         self.songQueue[ctx.guild], self.musicTitles[ctx.guild] = [], []
 
         if voice and voice.is_connected():
-            skipToTime = 0
+            self.skipToTime = 0
             asyncio.run_coroutine_threadsafe(voice.disconnect(), bot.loop)
             asyncio.run_coroutine_threadsafe(self.message[ctx.guild].delete(), bot.loop)
-            loop = False
-            await ctx.send("Left {}".format(channel), delete_after=5)
+            self.loop = False
+            await ctx.send(f"Left {channel}", delete_after=5)
 
     async def edit_message(self, ctx):
         embed = self.songQueue[ctx.guild][0]["embed"]
@@ -151,7 +147,7 @@ class Music(commands.Cog):
 
     @commands.command(pass_context=True, aliases=["PLAY", "p", "P"])
     async def play(self, ctx, *video: str):
-        global songStartTime, skipToTime
+
         song = self.search(ctx.author.mention, video)
         channel = ctx.message.author.voice.channel
         voice = get(bot.voice_clients, guild=ctx.guild)
@@ -165,31 +161,30 @@ class Music(commands.Cog):
             self.songQueue[ctx.guild] = [song]
             self.musicTitles[ctx.guild] = [video]
             self.message[ctx.guild] = await ctx.send(embed=song["embed"])
-            songStartTime = datetime.now()
+            self.songStartTime = datetime.now()
             voice.play(discord.FFmpegPCMAudio(executable=self.ffmpegPathUrl,
                                               source=self.songQueue[ctx.guild][0]["source"], **self.ffmpegOptions),
                        after=lambda e: self.playNext(ctx))
             voice.is_playing()
             # playSong = songQueue[ctx.guild][0]["source"]
             # await Player.play(voice, playSong)
-            skipToTime = 0
+            self.skipToTime = 0
         else:
             self.songQueue[ctx.guild].append(song)
             self.musicTitles[ctx.guild].append(video)
             await self.edit_message(ctx)
 
-    async def playNext(self, ctx):
-        global skipToTime, songStartTime, loop
-        endTime = songStartTime - datetime.now()
-        end = skipToTime
+    def playNext(self, ctx):
+        endTime = self.songStartTime - datetime.now()
+        end = self.skipToTime
         self.ffmpegOptions[
-            "before_options"] = f"-ss {skipToTime} -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 " \
+            "before_options"] = f"-ss {self.skipToTime} -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 " \
                                 f"-reconnect_delay_max 5"
         voice = get(bot.voice_clients, guild=ctx.guild)
 
         voice.is_paused()
 
-        if loop is True:
+        if self.loop is True:
             self.songQueue[ctx.guild].append(self.songQueue[ctx.guild][0])
             self.musicTitles[ctx.guild].append(self.musicTitles[ctx.guild][0])
         else:
@@ -201,13 +196,13 @@ class Music(commands.Cog):
             del self.songQueue[ctx.guild][0], self.musicTitles[ctx.guild][0]
 
             if TimeManager.timeParse(self.songQueue[ctx.guild][0]["duration"]) <= end:
-                skipToTime = 0
+                self.skipToTime = 0
                 voice.stop()
 
             song = self.search(ctx.author.mention, self.musicTitles[ctx.guild][0])
             self.songQueue[ctx.guild][0] = song
             asyncio.run_coroutine_threadsafe(self.edit_message(ctx), bot.loop)
-            songStartTime = datetime.now()
+            self.songStartTime = datetime.now()
             voice.play(discord.FFmpegPCMAudio(executable=self.ffmpegPathUrl,
                                               source=self.songQueue[ctx.guild][0]["source"], **self.ffmpegOptions),
                        after=lambda e: self.playNext(ctx))
@@ -215,7 +210,7 @@ class Music(commands.Cog):
         else:
             asyncio.run_coroutine_threadsafe(voice.disconnect(), bot.loop)
             asyncio.run_coroutine_threadsafe(self.message[ctx.guild].delete(), bot.loop)
-            loop = False
+            self.loop = False
 
     @commands.command(pass_context=True, aliases=["REPEAT", "r", "R", "again", "AGAIN", "replay", "REPLAY"])
     async def repeat(self, ctx):
@@ -236,7 +231,7 @@ class Music(commands.Cog):
             else:
                 await ctx.send("Nothing to repeat", delete_after=5)
 
-            await ctx.send("Repeat requested by: {}".format(ctx.message.author), delete_after=5)
+            await ctx.send(f"Repeat requested by: {ctx.message.author}", delete_after=self.repeatDeleteAfter)
             await self.edit_message(ctx)
         except Exception as e:
             print("Repeat exc:", e)
@@ -244,14 +239,13 @@ class Music(commands.Cog):
 
     @commands.command(pass_context=True, aliases=["LOOP", "l", "L"])
     async def loop(self, ctx):
-        global loop
         await ctx.channel.purge(limit=1)
 
-        if loop is True:
-            loop = False
+        if self.loop is True:
+            self.loop = False
             await ctx.send("**Loop disabled**")
         else:
-            loop = True
+            self.loop = True
             await ctx.send("**Loop enabled**")
 
     @commands.command(pass_context=True, aliases=["PAUSE", "stop", "STOP", "resume", "RESUME", "shutup", "SHUTUP"])
@@ -261,41 +255,39 @@ class Music(commands.Cog):
 
         if voice.is_connected():
             if voice.is_playing():
-                await ctx.send("**Music paused**", delete_after=5)
+                await ctx.send("**Music paused**", delete_after=self.pauseDeleteAfter)
                 voice.pause()
                 voice.is_paused()
             else:
-                await ctx.send("**Music resumed**", delete_after=5)
+                await ctx.send("**Music resumed**", delete_after=self.pauseDeleteAfter)
                 voice.resume()
 
     @commands.command(pass_context=True, aliases=["SKIP", "s", "S"])
     async def skip(self, ctx, time="0"):
-        global skipToTime
         skipped = 0
-        requestTime = songStartTime - datetime.now()
+        requestTime = self.songStartTime - datetime.now()
         voice = get(bot.voice_clients, guild=ctx.guild)
 
         try:
             if int(time) == 0:
                 await ctx.channel.purge(limit=1)
                 if voice.is_playing():
-                    await ctx.send("Track skipped", delete_after=5)
-                    skipToTime = 0
+                    await ctx.send("Track skipped", delete_after=self.skipDeleteAfter)
+                    self.skipToTime = 0
                     voice.stop()
                 else:
-                    await ctx.send("Nothing is playing", delete_after=5)
+                    await ctx.send("Nothing is playing", delete_after=self.skipDeleteAfter)
             else:
                 skipped += int(time) + abs(int(requestTime.total_seconds()))
-                skipToTime += skipped
-                await self.skipto(ctx, skipToTime)
+                self.skipToTime += skipped
+                await self.skipto(ctx, self.skipToTime)
         except:
             skipped += TimeManager.timeParse(time) + abs(int(requestTime.total_seconds()))
-            skipToTime += skipped
-            await self.skipto(ctx, skipToTime)
+            self.skipToTime += skipped
+            await self.skipto(ctx, self.skipToTime)
 
     @commands.command(pass_context=True, aliases=["SKIPTO", "st", "ST"])
     async def skipto(self, ctx, time):
-        global skipToTime
         await ctx.channel.purge(limit=1)
         channel = ctx.message.author.voice.channel
         voice = get(bot.voice_clients, guild=ctx.guild)
@@ -308,14 +300,14 @@ class Music(commands.Cog):
         if voice.is_playing():
             self.songQueue[ctx.guild].insert(1, self.songQueue[ctx.guild][0])
             self.musicTitles[ctx.guild].insert(1, self.musicTitles[ctx.guild][0])
-            skipToTime = TimeManager.timeParse(time)
+            self.skipToTime = TimeManager.timeParse(time)
             voice.stop()
         else:
-            await ctx.send("Nothing to skip", delete_after=5)
+            await ctx.send("Nothing to skip", delete_after=self.skipDeleteAfter)
 
         await ctx.send(
-            f"**Skipped to:** {TimeManager.parseDuration(skipToTime)} **Requested by:** {ctx.message.author}",
-            delete_after=25)
+            f"**Skipped to:** {TimeManager.parseDuration(self.skipToTime)} **Requested by:** {ctx.message.author}",
+            delete_after=self.skipDeleteAfter)
         await self.edit_message(ctx)
 
     @commands.command(pass_contex=True, aliases=["REMOVE", "rm", "RM"])
@@ -326,9 +318,7 @@ class Music(commands.Cog):
             await ctx.send("No such music position in queue", delete_after=5)
         asyncio.run_coroutine_threadsafe(self.edit_message(ctx), bot.loop)
 
-    @staticmethod
-    def chooseEmbedColor(color):
-        global embedColor
+    def chooseEmbedColor(self, color):
         color = color.lower()
         embedTitle = f"Your new discord embeds color is *{color}*"
         colorDict = {"blue": discord.Color.blue(), "purple": discord.Color.purple(),
@@ -344,7 +334,7 @@ class Music(commands.Cog):
                      "dark-theme": discord.Color.dark_theme()}
 
         if color in colorDict:
-            embedColor = colorDict[color]
+            self.embedColor = colorDict[color]
         else:
             embedTitle = f"No such color is presented, please choose something from *{commandPrefix}settings " \
                          f"embedColor*\nYour current embed color wasn't changed"
@@ -353,23 +343,23 @@ class Music(commands.Cog):
     @commands.command(pass_context=True, aliases=["SETTINGS", "set", "SET"])
     async def settings(self, ctx, task=None, *args):
         await ctx.channel.purge(limit=1)
-        global pauseTime, commandPrefix, embedColor
-
-        if task:
-            task = task.lower()
+        global commandPrefix
 
         if task is None:
             embed = discord.Embed(title=f"Settings command description", description=f"Command pattern is\n"
                                                                                      f"**{commandPrefix}settings [task]**"
                                                                                      f" **[argument]**",
-                                  color=embedColor) \
+                                  color=self.embedColor) \
                 .add_field(name=f"{commandPrefix}settings commandPrefix [symbol]", value="Sets given symbol as command "
                                                                                          "prefix") \
                 .add_field(name=f"{commandPrefix}settings embedColor", value=f"Prints all possible embed colors",
                            inline=False) \
                 .add_field(name=f"{commandPrefix}settings embedColor [color]", value=f"Sets given color as embed color")
             await ctx.send(embed=embed)
-        elif task == "commandprefix":
+        else:
+            task = task.lower()
+
+        if task == "commandprefix":
             if not args:
                 await ctx.send("Please give a prefix after [commandPrefix]", delete_after=5)
             else:
@@ -379,18 +369,62 @@ class Music(commands.Cog):
         elif task == "embedcolor":
             if not args:
                 await ctx.send(embed=discord.Embed(title=f"Possible colors are",
-                                                   description="*blue\npurple\nred\norange\ngreen\nmagenta\nteal\ngold*\n"
-                                                               f"*blue-purple\nlight-grey\ndark-blue\ndark-gold*\n"
+                                                   description="*blue\npurple\nred\norange\ngreen\nmagenta\nteal\ngold*"
+                                                               f"\n*blue-purple\nlight-grey\ndark-blue\ndark-gold*\n"
                                                                f"*dark-green\ndark-purple\ndark-grey\n*dark-magenta*\n"
                                                                f"*dark-orange\ndark-red\ndark-teal\ndark-theme*\n"
                                                                f"Use command __*{commandPrefix}settings embedColor* "
                                                                f"*dark-purple*__ to set embeds color",
-                                                   color=embedColor))
+                                                   color=self.embedColor))
             else:
                 color = args[0].lower()
                 embedTitle = self.chooseEmbedColor(color)
-                embed = discord.Embed(title=embedTitle, color=embedColor)
+                embed = discord.Embed(title=embedTitle, color=self.embedColor)
                 await ctx.send(embed=embed)
+        elif task == "deleteafter":
+            arg = ""
+            if args[0] is None:
+                await ctx.send(embed=discord.Embed(title="Possible to set time in this commands",
+                                                   description=f"Command pattern is **{commandPrefix}settings** "
+                                                               f"**deleteAfter [command to set delete after time] **"
+                                                               f"[seconds]**")
+                               .add_field(name="repeat", value="delete repeat command message")
+                               .add_field(name="pause", value="delete pause command message")
+                               .add_field(name="skip", value="delete skip command message")
+                               .add_field(name="volume", value="delete volume command message"))
+            else:
+                arg = args[0].lower()
+
+            if arg == "repeat":
+                try:
+                    self.repeatDeleteAfter = int(args[1])
+                except Exception as e:
+                    print(f"Settings repeat delete after exc: {e}")
+                    await ctx.send(f"Could not convert given value [{args[1]}] to the integer")
+                await ctx.send(f"Repeat command delete time had been set to {self.repeatDeleteAfter} seconds")
+            elif arg == "pause":
+                try:
+                    self.repeatDeleteAfter = int(args[1])
+                except Exception as e:
+                    print(f"Settings pause delete after exc: {e}")
+                    await ctx.send(f"Could not convert given value [{args[1]}] to the integer")
+                await ctx.send(f"Pause command delete time had been set to {self.pauseDeleteAfter} seconds")
+            elif arg == "skip":
+                try:
+                    self.repeatDeleteAfter = int(args[1])
+                except Exception as e:
+                    print(f"Settings skip delete after exc: {e}")
+                    await ctx.send(f"Could not convert given value [{args[1]}] to the integer")
+                await ctx.send(f"Skip command delete time had been set to {self.skipDeleteAfter} seconds")
+            elif arg == "volume":
+                try:
+                    self.repeatDeleteAfter = int(args[1])
+                except Exception as e:
+                    print(f"Settings volume delete after exc: {e}")
+                    await ctx.send(f"Could not convert given value [{args[1]}] to the integer")
+                await ctx.send(f"Volume command delete time had been set to {self.volumeDeleteAfter} seconds")
+            else:
+                await ctx.send("No such command for delete after")
 
     def getInfo(self, query):
         with youtube_dl.YoutubeDL(self.ydlOptions) as ydl:
@@ -424,7 +458,7 @@ class Music(commands.Cog):
         if not task:
             embed = discord.Embed(title="Playlist commands description",
                                   description=f"The pattern of command is\n**{commandPrefix}playlist [task] "
-                                              f"[playlist title] [music title]**", color=embedColor) \
+                                              f"[playlist title] [music title]**", color=self.embedColor) \
                 .add_field(name=f"{commandPrefix}playlist show", value=f"Shows server playlists", inline=False) \
                 .add_field(name=f"{commandPrefix}playlist show [playlist title]",
                            value=f"Shows all tracks from playlist") \
@@ -458,7 +492,7 @@ class Music(commands.Cog):
                 records = myCursor.fetchall()
                 for row in records:
                     playlists += f"*{row[0]}*\n"
-                embed = discord.Embed(title="Server playlists", description=f"{playlists}", color=embedColor)
+                embed = discord.Embed(title="Server playlists", description=f"{playlists}", color=self.embedColor)
                 await ctx.send(embed=embed)
             else:
                 songs = ""
@@ -468,7 +502,7 @@ class Music(commands.Cog):
                 records = myCursor.fetchall()
                 for row in records:
                     songs += f"{row[0]}\n"
-                embed = discord.Embed(title=f"*{title}* playlist music", description=f"{songs}", color=embedColor)
+                embed = discord.Embed(title=f"*{title}* playlist music", description=f"{songs}", color=self.embedColor)
                 await ctx.send(embed=embed)
         elif task == "add":
             tags = ""
@@ -519,7 +553,7 @@ class Music(commands.Cog):
     @commands.command(pass_context=True, aliases=["HELP", "h", "H"])
     async def help(self, ctx):
         await ctx.channel.purge(limit=1)
-        embed = discord.Embed(title="Help", description="Commands", color=embedColor) \
+        embed = discord.Embed(title="Help", description="Commands", color=self.embedColor) \
             .add_field(name=f"*{commandPrefix}hello*", value="Greets the user", inline=True) \
             .add_field(name=f"*{commandPrefix}users*", value="Prints number of users on server", inline=True) \
             .add_field(name=f"*{commandPrefix}join*", value="Bot will join voice channel", inline=True) \
@@ -552,7 +586,7 @@ class Music(commands.Cog):
     @commands.command(pass_context=True, aliases=["EXTENDEDHELP", "eh", "Eh", "aliases", "ALIASES"])
     async def extendedhelp(self, ctx):
         await ctx.channel.purge(limit=1)
-        embed = discord.Embed(title="Help", description="Extended help commands and aliases", color=embedColor) \
+        embed = discord.Embed(title="Help", description="Extended help commands and aliases", color=self.embedColor) \
             .add_field(name=f"*{commandPrefix}play*",
                        value=f'Aliases are: "**{commandPrefix}PLAY**", "**{commandPrefix}p**", "**{commandPrefix}P**"',
                        inline=False) \
@@ -596,7 +630,7 @@ class Music(commands.Cog):
 
     @commands.command(pass_context=True)
     async def users(self, ctx):
-        await ctx.send("Number of users on server: {}".format(ctx.guild.member_count))
+        await ctx.send(f"Number of users on server: {ctx.guild.member_count}")
 
     @commands.command(pass_context=True, aliases=["QUEUE", "q", "Q"])
     async def queue(self, ctx, page=1):
@@ -624,7 +658,7 @@ class Music(commands.Cog):
         else:
             content = "No queued songs"
 
-        embed = (discord.Embed(title="Music queue", color=embedColor)
+        embed = (discord.Embed(title="Music queue", color=self.embedColor)
                  .add_field(name="Playing now: ", value=playing, inline=False)
                  .add_field(name="Requested by", value=f"{ctx.author.mention}", inline=True)
                  .add_field(name="Duration", value=self.songQueue[ctx.guild][0]['duration'], inline=True)
@@ -638,7 +672,7 @@ class Music(commands.Cog):
         voice = get(bot.voice_clients, guild=ctx.guild)
         voice.source = discord.PCMVolumeTransformer(voice.source)
         voice.source.volume = volume / 100
-        await ctx.send(f"Volume changed to {volume}%", delete_after=15)
+        await ctx.send(f"Volume changed to {volume}%", delete_after=self.volumeDeleteAfter)
 
     @play.error
     @repeat.error
@@ -668,27 +702,6 @@ class Music(commands.Cog):
         else:
             print("Error handler:", error)
 
-    # todo join, rejoin, wait after everyone leaves, leave after no one mentions for some time || task ended
-    # @bot.event
-    # async def on_voice_state_update(member, before, after):
-    #     print("Channel {}\n {}\n {}\n".format(member, before, after))
-    #     # if after.channel is None:
-    #     #     asyncio.sleep(2)
-
-    # @bot.event
-    # async def on_member_join(member):
-    #     global joined
-    #     joined += 1
-    #     # for channel in member.guild.channels:
-    #     #     if str(channel) == "general":
-    #     #         print("Someone connected")
-    #     await member.create_dm()
-    #     await member.dm_channel.send(f'Hi {member.name}, welcome to my Discord server!')
-
-    # @bot.event
-    # async def on_server_join():
-    #     pass
-
     async def clearDatabase(self):
         guilds = []
         await bot.wait_until_ready()
@@ -707,7 +720,6 @@ class Music(commands.Cog):
 
                 myCursor = mySqlDB.cursor()
                 sqlQuery = "SELECT DISTINCT guildId FROM playlists"
-                # values = (guild.id,)
                 myCursor.execute(sqlQuery)
                 records = myCursor.fetchall()
                 for guild in records:
@@ -730,8 +742,8 @@ bot.remove_command("help")
 async def on_ready():
     print(f"We have logged in as {bot.user}")
     perms = discord.Permissions(permissions=8)
-    invite_link = discord.utils.oauth_url(bot.user.id, permissions=perms)
-    print(f"Use this link to add bot to your server: {invite_link}")
+    inviteLink = discord.utils.oauth_url(bot.user.id, permissions=perms)
+    print(f"Use this link to add bot to your server: {inviteLink}")
 
     activity = discord.Game(name=f"{commandPrefix}help", type=3)
     await bot.change_presence(activity=activity)
@@ -740,17 +752,38 @@ async def on_ready():
         print(f"{bot.user} is connected to the following guild: {guild.name}. Guild id: {guild.id}")
 
 
-@bot.event
-async def on_member_update(before, after):
-    nickname = after.nick
-    if nickname:
-        if nickname.lower().count("dream") > 0:
-            lastNickname = before.nick
-            if lastNickname:
-                await after.edit(nick=lastNickname)
-            else:
-                await after.edit(nick="Nickname dream is reserved by bot, please change your role or nickname")
+# @bot.event
+# async def on_member_update(before, after):
+#     nickname = after.nick
+#     if nickname:
+#         if nickname.lower().count("dream") > 0:
+#             lastNickname = before.nick
+#             if lastNickname:
+#                 await after.edit(nick=lastNickname)
+#             else:
+#                 await after.edit(nick="Nickname dream is reserved by bot, please change your role or nickname")
 
+
+# todo join, rejoin, wait after everyone leaves, leave after no one mentions for some time || task ended
+    # @bot.event
+    # async def on_voice_state_update(member, before, after):
+    #     print("Channel {}\n {}\n {}\n".format(member, before, after))
+    #     # if after.channel is None:
+    #     #     asyncio.sleep(2)
+
+    # @bot.event
+    # async def on_member_join(member):
+    #     global joined
+    #     joined += 1
+    #     # for channel in member.guild.channels:
+    #     #     if str(channel) == "general":
+    #     #         print("Someone connected")
+    #     await member.create_dm()
+    #     await member.dm_channel.send(f'Hi {member.name}, welcome to my Discord server!')
+
+    # @bot.event
+    # async def on_server_join():
+    #     pass
 
 if __name__ == "__main__":
     bot.add_cog(Music(bot))
