@@ -1,6 +1,6 @@
 import asyncio
 from datetime import datetime
-import requests
+import aiohttp
 import youtube_dl
 import discord
 from discord.ext import commands
@@ -18,16 +18,14 @@ token = open("token.txt", "r").read()
 #     ffmpegPathUrl = open("ffmpegPathUrl.txt", "r").read()
 #     dbCreds = open("dbCreds.txt", "r").read().split(";")
 
-# todo launch on_message with asyncio coroutine that can notify functions when event(command invoked)
+# todo launch on_message with asyncio coroutine that can notify functions when event (command invoked)
 # todo track command messages with on_message to remove rubbish
 # todo add spotify player [???]
-# todo loop (done) -> need to avoid global boolean variable loop (done)
 # todo extract direct url to youtube from [query] and link it with music title
 # todo list a youtube playlist with choice indices on play command
 # todo fix url with youtube playlists (currently playing 1st song in playlist, need to play exact one)
 # todo create channel [???]
-# todo add to settings deleting[delete_after] all other commands which are unnecessary (done)
-# todo set pause timer in settings
+# todo rewrite with using aiohttp, but not requests package, requests is non-async and can block loop (done)
 
 
 # todo redo with using a database || reading previous messages (preferred to read)
@@ -127,7 +125,9 @@ class Music(commands.Cog):
     def search(self, author, url):
         with youtube_dl.YoutubeDL(self.ydlOptions) as ydl:
             try:
-                requests.get(url)
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url) as r:
+                        info = r
             except:
                 info = ydl.extract_info(f"ytsearch:{url}", download=False)["entries"][0]
             else:
@@ -429,7 +429,9 @@ class Music(commands.Cog):
     def getInfo(self, query):
         with youtube_dl.YoutubeDL(self.ydlOptions) as ydl:
             try:
-                requests.get(query)
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(query) as r:
+                        info = r
             except:
                 info = ydl.extract_info(f"ytsearch:{query}", download=False)["entries"][0]
             else:
