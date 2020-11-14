@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime
 import aiohttp
+import requests
 import youtube_dl
 import discord
 from discord.ext import commands
@@ -25,8 +26,7 @@ token = open("token.txt", "r").read()
 # todo list a youtube playlist with choice indices on play command
 # todo fix url with youtube playlists (currently playing 1st song in playlist, need to play exact one)
 # todo create channel [???]
-# todo rewrite with using aiohttp, but not requests package, requests is non-async and can block loop (done)
-
+# todo fix when music looped bot must leave after everyone leaves channel
 
 # todo redo with using a database || reading previous messages (preferred to read)
 # async def update_stats():
@@ -116,7 +116,7 @@ class Music(commands.Cog):
         content = "\n".join([f"**{self.songQueue[ctx.guild].index(i)}:**"
                              f"[{i['title']}]({i['webpage_url']})\n**Requested by:** {ctx.author.mention} "
                              f"**Duration:** {i['duration']}"
-                             for i in self.songQueue[ctx.guild][1:]]) if len(self.songQueue[ctx.guild]) > 1 \
+                             for i in self.songQueue[ctx.guild][1:5]]) if len(self.songQueue[ctx.guild]) > 1 \
             else "No songs are queued"
 
         embed.set_field_at(index=3, name="Queue", value=content, inline=False)
@@ -125,9 +125,10 @@ class Music(commands.Cog):
     def search(self, author, url):
         with youtube_dl.YoutubeDL(self.ydlOptions) as ydl:
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(url) as r:
-                        info = r
+                requests.get(url)
+                # async with aiohttp.ClientSession() as session:
+                #     async with session.get(url) as r:
+                #         info = r
             except:
                 info = ydl.extract_info(f"ytsearch:{url}", download=False)["entries"][0]
             else:
@@ -429,9 +430,10 @@ class Music(commands.Cog):
     def getInfo(self, query):
         with youtube_dl.YoutubeDL(self.ydlOptions) as ydl:
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(query) as r:
-                        info = r
+                requests.get(query)
+                # async with aiohttp.ClientSession() as session:
+                #     async with session.get(query) as r:
+                #         info = r
             except:
                 info = ydl.extract_info(f"ytsearch:{query}", download=False)["entries"][0]
             else:
