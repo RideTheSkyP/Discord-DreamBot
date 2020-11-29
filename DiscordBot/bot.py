@@ -1,6 +1,5 @@
 import asyncio
 from datetime import datetime
-import aiohttp
 import requests
 import youtube_dl
 import discord
@@ -8,6 +7,7 @@ from discord.ext import commands
 from discord.utils import get
 import mysql.connector
 from timeManager import TimeManager
+
 # from player import Player
 
 token = open("token.txt", "r").read()
@@ -64,7 +64,7 @@ class Music(commands.Cog):
         self.ydlOptions = {
             "format": "bestaudio",
             "noplaylist": True,
-            "bitrate": 192000,
+            "bitrate": 320000,
             # "quite": True,
             "encoding": "utf-8",
             "default_search": "auto",
@@ -769,25 +769,25 @@ async def on_ready():
 
 
 # todo join, rejoin, wait after everyone leaves, leave after no one mentions for some time || task ended
-    # @bot.event
-    # async def on_voice_state_update(member, before, after):
-    #     print("Channel {}\n {}\n {}\n".format(member, before, after))
-    #     # if after.channel is None:
-    #     #     asyncio.sleep(2)
+# @bot.event
+# async def on_voice_state_update(member, before, after):
+#     print("Channel {}\n {}\n {}\n".format(member, before, after))
+#     # if after.channel is None:
+#     #     asyncio.sleep(2)
 
-    # @bot.event
-    # async def on_member_join(member):
-    #     global joined
-    #     joined += 1
-    #     # for channel in member.guild.channels:
-    #     #     if str(channel) == "general":
-    #     #         print("Someone connected")
-    #     await member.create_dm()
-    #     await member.dm_channel.send(f'Hi {member.name}, welcome to my Discord server!')
+# @bot.event
+# async def on_member_join(member):
+#     global joined
+#     joined += 1
+#     # for channel in member.guild.channels:
+#     #     if str(channel) == "general":
+#     #         print("Someone connected")
+#     await member.create_dm()
+#     await member.dm_channel.send(f'Hi {member.name}, welcome to my Discord server!')
 
-    # @bot.event
-    # async def on_server_join():
-    #     pass
+# @bot.event
+# async def on_server_join():
+#     pass
 
 if __name__ == "__main__":
     bot.add_cog(Music(bot))
