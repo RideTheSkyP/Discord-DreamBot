@@ -6,6 +6,7 @@ import discord
 from discord.ext import commands
 from discord.utils import get
 import mysql.connector
+import validators
 from timeManager import TimeManager
 
 # from player import Player
@@ -55,6 +56,7 @@ class Music(commands.Cog):
         self.songStartTime = 0
         self.repeatDeleteAfter, self.pauseDeleteAfter, self.skipDeleteAfter, self.volumeDeleteAfter = 5, 5, 25, 15
         self.loop = False
+        self.playlistDisabled = True
         self.songQueue = {}
         self.musicTitles = {}
         self.message = {}
@@ -63,7 +65,7 @@ class Music(commands.Cog):
         self.dbCreds = open("dbCreds.txt", "r").read().split(";")
         self.ydlOptions = {
             "format": "bestaudio",
-            "noplaylist": True,
+            "noplaylist": self.playlistDisabled,
             "bitrate": 320000,
             # "quite": True,
             "encoding": "utf-8",
@@ -80,7 +82,9 @@ class Music(commands.Cog):
             "ffmpeg_location": self.ffmpegPathUrl
         }
         self.ffmpegOptions = {
-            "before_options": f"-ss {self.skipToTime} -reconnect 1 -reconnect_at_eof 1 -reconnect_streamed 1 -reconnect_delay_max 5",
+            "before_options": f"-ss {self.skipToTime} "
+                              f"-reconnect 1 -reconnect_at_eof 1 "
+                              f"-reconnect_streamed 1 -reconnect_delay_max 5",
             "options": "-vn"
         }
 
@@ -126,13 +130,12 @@ class Music(commands.Cog):
         with youtube_dl.YoutubeDL(self.ydlOptions) as ydl:
             try:
                 requests.get(url)
-                # async with aiohttp.ClientSession() as session:
-                #     async with session.get(url) as r:
-                #         info = r
             except:
-                info = ydl.extract_info(f"ytsearch:{url}", download=False)["entries"][0]
-            else:
-                info = ydl.extract_info(url, download=False)
+                if len(url) > 0:
+                    if validators.url(url[0]):
+                        info = ydl.extract_info(url[0], download=False)
+                    else:
+                        info = ydl.extract_info(f"ytsearch:{url}", download=False)["entries"][0]
 
             embed = (discord.Embed(title="Currently playing", description=f"[{info['title']}]({info['webpage_url']})",
                                    color=self.embedColor)
@@ -148,7 +151,6 @@ class Music(commands.Cog):
 
     @commands.command(pass_context=True, aliases=["PLAY", "p", "P"])
     async def play(self, ctx, *video: str):
-
         song = self.search(ctx.author.mention, video)
         channel = ctx.message.author.voice.channel
         voice = get(bot.voice_clients, guild=ctx.guild)
@@ -262,6 +264,13 @@ class Music(commands.Cog):
             else:
                 await ctx.send("**Music resumed**", delete_after=self.pauseDeleteAfter)
                 voice.resume()
+
+    @commands.command(pass_context=True, aliases=["enableYTPlaylists", "EYTP", "eytp"])
+    async def changeYoutubePlaylistsState(self, ctx):
+        self.playlistDisabled = False if self.playlistDisabled else True
+        self.ydlOptions["noplaylist"] = self.playlistDisabled
+        await ctx.send(f"**Youtube playlists {'disabled' if self.playlistDisabled else 'enabled'}**",
+                       delete_after=self.pauseDeleteAfter)
 
     @commands.command(pass_context=True, aliases=["SKIP", "s", "S"])
     async def skip(self, ctx, time="0"):
@@ -691,7 +700,6 @@ class Music(commands.Cog):
     @volume.error
     async def errorHandler(self, ctx, error):
         if isinstance(error, commands.CommandInvokeError):
-            print(error)
             await ctx.send("You're not connected to the voice channel or nothing playing now", delete_after=5)
         elif isinstance(error, commands.MissingRequiredArgument):
             await ctx.send("Command requires additional info", delete_after=5)

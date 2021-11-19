@@ -1,3 +1,5 @@
 .idea
 DiscordBot/token.txt
 DiscordBot/.idea
+DiscordBot/dbCreds.txt
+DiscordBot/__pycache__/timeManager.cpython-310.pyc
