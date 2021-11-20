@@ -26,6 +26,7 @@ token = open("token.txt", "r").read()
 # todo In search leave only info gathering, edit message and embed move to [func]
 # todo Make search func async by removing return stmt, move return to edit msg
 
+# todo launch player in threads [???]
 # todo launch on_message with asyncio coroutine that can notify functions when event (command invoked)
 # todo track command messages with on_message to remove rubbish
 # todo add spotify player [???]
@@ -122,17 +123,28 @@ class Music(commands.Cog):
             await ctx.send(f"Left {channel}", delete_after=5)
 
     async def edit_message(self, ctx):
-        embed = self.songQueue[ctx.guild.id][0]["embed"]
+        currentSong = self.songQueue[ctx.guild.id][0]
+        embed = (discord.Embed(title="Currently playing",
+                               description=f"[{currentSong['title']}]({currentSong['webpage_url']})",
+                               color=self.embedColor)
+                 .add_field(name="Duration", value=TimeManager.parseDuration(currentSong["duration"]))
+                 .add_field(name="Requested by", value=ctx.author.mention)
+                 .add_field(name="Uploader", value=f"[{currentSong['uploader']}]({currentSong['channel_url']})")
+                 .add_field(name="Queue", value="No song queued")
+                 .set_thumbnail(url=currentSong["thumbnail"]))
         content = "\n".join([f"**{self.songQueue[ctx.guild.id].index(i)}:**"
                              f"[{i['title']}]({i['webpage_url']})\n**Requested by:** {ctx.author.mention} "
-                             f"**Duration:** {i['duration']}"
+                             f"**Duration:** {TimeManager.parseDuration(i['duration'])}"
                              for i in self.songQueue[ctx.guild.id][1:5]]) if len(self.songQueue[ctx.guild.id]) > 1 \
             else "No songs are queued"
-
         embed.set_field_at(index=3, name="Queue", value=content, inline=False)
-        await self.message[ctx.guild.id].edit(embed=embed)
 
-    def search(self, ctx, author, url):
+        if ctx.guild.id in self.message:
+            await self.message[ctx.guild.id].edit(embed=embed)
+        else:
+            self.message[ctx.guild.id] = await ctx.send(embed=embed)
+
+    async def search(self, ctx, url):
         with youtube_dl.YoutubeDL(self.ydlOptions) as ydl:
             try:
                 requests.get(url)
@@ -142,40 +154,19 @@ class Music(commands.Cog):
                         info = ydl.extract_info(url[0], download=False)
                     else:
                         info = ydl.extract_info(f"ytsearch:{url}", download=False)
-            firstEntry = info["entries"][0]
+
             for i, entry in enumerate(info["entries"]):
                 if i == 0:
-                    embed = (discord.Embed(title="Currently playing",
-                                           description=f"[{entry['title']}]({entry['webpage_url']})",
-                                           color=self.embedColor)
-                             .add_field(name="Duration", value=TimeManager.parseDuration(entry["duration"]))
-                             .add_field(name="Requested by", value=author)
-                             .add_field(name="Uploader", value=f"[{entry['uploader']}]({entry['channel_url']})")
-                             .add_field(name="Queue", value="No song queued")
-                             .set_thumbnail(url=entry["thumbnail"]))
-                else:
-                    if ctx.guild.id in self.songQueue:
-                        self.songQueue[ctx.guild.id].append(entry)
-                        self.musicTitles[ctx.guild.id].append(entry["formats"][0]["url"])
-                    else:
+                    if ctx.guild.id not in self.songQueue:
                         self.songQueue[ctx.guild.id] = [entry]
                         self.musicTitles[ctx.guild.id] = [entry["formats"][0]["url"]]
-                    # print(self.songQueue.keys())
-            print(self.songQueue.keys())
-            # print(self.songQueue[ctx.guild.id])
-                # print(self.songQueue[ctx.guild])
-                    # # video = link
-                    # print(self.songQueue[ctx.guild])
-                    # self.edit_message(ctx)
-            print(firstEntry["formats"][0]["url"])
-
-            # return {"embed": embed, "source": firstEntry["formats"][0]["url"], "title": firstEntry["title"],
-            #         "webpage_url": firstEntry["webpage_url"], "thumbnail": firstEntry["thumbnail"],
-            #         "duration": TimeManager.parseDuration(firstEntry["duration"])}
+                else:
+                    self.songQueue[ctx.guild.id].append(entry)
+                    self.musicTitles[ctx.guild.id].append(entry["formats"][0]["url"])
 
     @commands.command(pass_context=True, aliases=["PLAY", "p", "P"])
     async def play(self, ctx, *video: str):
-        self.search(ctx, ctx.author.mention, video)
+        await self.search(ctx, video)
         print("play", len(self.songQueue[ctx.guild.id]))
         channel = ctx.message.author.voice.channel
         voice = get(bot.voice_clients, guild=ctx.guild)
@@ -186,47 +177,35 @@ class Music(commands.Cog):
             voice = await channel.connect()
 
         if not voice.is_playing():
-            print("123", self.songQueue[ctx.guild.id][0].keys())
-            # self.message[ctx.guild.id] = await ctx.send(embed=song["embed"])
-            print("1234", self.musicTitles)
             self.songStartTime = datetime.now()
-            print("12345")
             voice.play(discord.FFmpegPCMAudio(executable=self.ffmpegPathUrl,
                                               source=self.musicTitles[ctx.guild.id][0], **self.ffmpegOptions),
                        after=lambda e: self.playNext(ctx))
-            print("123456")
             voice.is_playing()
-            # playSong = songQueue[ctx.guild][0]["source"]
-            # await Player.play(voice, playSong)
             self.skipToTime = 0
-        else:
-            pass
-            # self.songQueue[ctx.guild.id].append(song)
-            # self.musicTitles[ctx.guild.id].append(video)
-            # await self.edit_message(ctx)
+        await self.edit_message(ctx)
 
     def playNext(self, ctx):
-        print("next", len(self.songQueue[ctx.guild.id]))
-        if get(bot.voice_clients, guild=ctx.guild).is_connected():
-            print("next1", len(self.songQueue[ctx.guild.id]))
+        voice = get(bot.voice_clients, guild=ctx.guild)
+        if voice is None:
+            del self.songQueue[ctx.guild.id]
+            del self.musicTitles[ctx.guild.id]
+            del self.message[ctx.guild.id]
+        elif voice.is_connected():
             endTime = self.songStartTime - datetime.now()
             end = self.skipToTime
             self.ffmpegOptions["before_options"] = f"-ss {self.skipToTime} -reconnect 1 " \
                                                    f"-reconnect_at_eof 1 -reconnect_streamed 1 " \
                                                    f"-reconnect_delay_max 5"
             voice = get(bot.voice_clients, guild=ctx.guild)
-            print("next2", len(self.songQueue[ctx.guild.id]))
             voice.is_paused()
-            print("next3", len(self.songQueue[ctx.guild.id]))
             if self.loop is True:
                 self.songQueue[ctx.guild.id].append(self.songQueue[ctx.guild.id][0])
                 self.musicTitles[ctx.guild.id].append(self.musicTitles[ctx.guild.id][0])
             else:
                 pass
-            print("next4", len(self.songQueue[ctx.guild.id]))
             end += abs(int(endTime.total_seconds()))
-            print("next5", len(self.songQueue[ctx.guild.id]))
-            print("CONN")
+            print(self.songQueue[ctx.guild.id])
             if len(self.songQueue[ctx.guild.id]) > 1 and len(self.musicTitles[ctx.guild.id]) > 1:
                 del self.songQueue[ctx.guild.id][0], self.musicTitles[ctx.guild.id][0]
 
@@ -234,8 +213,6 @@ class Music(commands.Cog):
                     self.skipToTime = 0
                     voice.stop()
 
-                # song = self.search(ctx, ctx.author.mention, self.musicTitles[ctx.guild.id][0])
-                # self.songQueue[ctx.guild.id][0] = song
                 asyncio.run_coroutine_threadsafe(self.edit_message(ctx), bot.loop)
                 self.songStartTime = datetime.now()
                 voice.play(discord.FFmpegPCMAudio(executable=self.ffmpegPathUrl,
@@ -693,7 +670,8 @@ class Music(commands.Cog):
                 if page == iterator // queueSize:
                     content += "\n".join(
                         [f" **{self.songQueue[ctx.guild.id].index(i)}:** [{i['title']}]({i['webpage_url']})\n"
-                         f"**Requested by:** {ctx.author.mention}   **Duration:** {i['duration']}\n"])
+                         f"**Requested by:** {ctx.author.mention}   "
+                         f"**Duration:** {TimeManager.parseDuration(i['duration'])}\n"])
             if pg > 1:
                 content += "\n".join([f"**Page:** {page + 1}/{pg}"])
         else:
