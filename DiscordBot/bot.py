@@ -23,19 +23,19 @@ token = open("token.txt", "r").read()
 #     token = open("token.txt", "r").read()
 #     ffmpegPathUrl = open("ffmpegPathUrl.txt", "r").read()
 #     dbCreds = open("dbCreds.txt", "r").read().split(";")
-# todo In search leave only info gathering, edit message and embed move to [func]
-# todo Make search func async by removing return stmt, move return to edit msg
+# todo In search leave only info gathering, edit message and embed move to [func] [done]
+# todo Make search func async by removing return stmt, move return to edit msg [done]
+# todo fix url with youtube playlists (currently playing 1st song in playlist, need to play exact one) [done]
 
+# todo Write to database playlist states, etc
 # todo launch player in threads [???]
 # todo launch on_message with asyncio coroutine that can notify functions when event (command invoked)
 # todo track command messages with on_message to remove rubbish
 # todo add spotify player [???]
 # todo extract direct url to youtube from [query] and link it with music title
 # todo list a youtube playlist with choice indices on play command
-# todo fix url with youtube playlists (currently playing 1st song in playlist, need to play exact one)
 # todo create channel [???]
 # todo fix when music looped, bot must leave after everyone leaves channel
-
 # todo redo with using a database || reading previous messages (preferred to read)
 # async def update_stats():
 #     await bot.wait_until_ready()
@@ -167,7 +167,6 @@ class Music(commands.Cog):
     @commands.command(pass_context=True, aliases=["PLAY", "p", "P"])
     async def play(self, ctx, *video: str):
         await self.search(ctx, video)
-        print("play", len(self.songQueue[ctx.guild.id]))
         channel = ctx.message.author.voice.channel
         voice = get(bot.voice_clients, guild=ctx.guild)
 
@@ -178,9 +177,7 @@ class Music(commands.Cog):
 
         if not voice.is_playing():
             self.songStartTime = datetime.now()
-            voice.play(discord.FFmpegPCMAudio(executable=self.ffmpegPathUrl,
-                                              source=self.musicTitles[ctx.guild.id][0], **self.ffmpegOptions),
-                       after=lambda e: self.playNext(ctx))
+            self._playMusic(ctx, self.ffmpegPathUrl, self.musicTitles[ctx.guild.id][0])
             voice.is_playing()
             self.skipToTime = 0
         await self.edit_message(ctx)
@@ -199,13 +196,13 @@ class Music(commands.Cog):
                                                    f"-reconnect_delay_max 5"
             voice = get(bot.voice_clients, guild=ctx.guild)
             voice.is_paused()
+
             if self.loop is True:
                 self.songQueue[ctx.guild.id].append(self.songQueue[ctx.guild.id][0])
                 self.musicTitles[ctx.guild.id].append(self.musicTitles[ctx.guild.id][0])
-            else:
-                pass
+
             end += abs(int(endTime.total_seconds()))
-            print(self.songQueue[ctx.guild.id])
+
             if len(self.songQueue[ctx.guild.id]) > 1 and len(self.musicTitles[ctx.guild.id]) > 1:
                 del self.songQueue[ctx.guild.id][0], self.musicTitles[ctx.guild.id][0]
 
@@ -215,15 +212,20 @@ class Music(commands.Cog):
 
                 asyncio.run_coroutine_threadsafe(self.edit_message(ctx), bot.loop)
                 self.songStartTime = datetime.now()
-                voice.play(discord.FFmpegPCMAudio(executable=self.ffmpegPathUrl,
-                                                  source=self.musicTitles[ctx.guild.id][0],
-                                                  **self.ffmpegOptions),
-                           after=lambda e: self.playNext(ctx))
+                self._playMusic(ctx, self.ffmpegPathUrl, self.musicTitles[ctx.guild.id][0])
                 voice.is_playing()
             else:
+                del self.songQueue[ctx.guild.id]
+                del self.musicTitles[ctx.guild.id]
+                del self.message[ctx.guild.id]
                 asyncio.run_coroutine_threadsafe(voice.disconnect(), bot.loop)
                 asyncio.run_coroutine_threadsafe(self.message[ctx.guild.id].delete(), bot.loop)
                 self.loop = False
+
+    def _playMusic(self, ctx, executable, source):
+        voice = get(bot.voice_clients, guild=ctx.guild)
+        voice.play(discord.FFmpegPCMAudio(executable=executable, source=source, **self.ffmpegOptions),
+                   after=lambda e: self.playNext(ctx))
 
     @commands.command(pass_context=True, aliases=["REPEAT", "r", "R", "again", "AGAIN", "replay", "REPLAY"])
     async def repeat(self, ctx):
@@ -362,7 +364,8 @@ class Music(commands.Cog):
 
         if task is None:
             embed = discord.Embed(title=f"Settings command description", description=f"Command pattern is\n"
-                                                                                     f"**{commandPrefix}settings [task]**"
+                                                                                     f"**{commandPrefix}settings "
+                                                                                     f"[task]**"
                                                                                      f" **[argument]**",
                                   color=self.embedColor) \
                 .add_field(name=f"{commandPrefix}settings commandPrefix [symbol]", value="Sets given symbol as command "
@@ -373,73 +376,80 @@ class Music(commands.Cog):
             await ctx.send(embed=embed)
         else:
             task = task.lower()
-
-        if task == "commandprefix":
-            if not args:
-                await ctx.send("Please give a prefix after [commandPrefix]", delete_after=5)
-            else:
-                commandPrefix = args[0]
-                bot.command_prefix = commandPrefix
-                await ctx.send(f"Your new command prefix is {args[0]}")
-        elif task == "embedcolor":
-            if not args:
-                await ctx.send(embed=discord.Embed(title=f"Possible colors are",
-                                                   description="*blue\npurple\nred\norange\ngreen\nmagenta\nteal\ngold*"
-                                                               f"\n*blue-purple\nlight-grey\ndark-blue\ndark-gold*\n"
-                                                               f"*dark-green\ndark-purple\ndark-grey\n*dark-magenta*\n"
-                                                               f"*dark-orange\ndark-red\ndark-teal\ndark-theme*\n"
-                                                               f"Use command __*{commandPrefix}settings embedColor* "
-                                                               f"*dark-purple*__ to set embeds color",
-                                                   color=self.embedColor))
-            else:
-                color = args[0].lower()
-                embedTitle = self.chooseEmbedColor(color)
-                embed = discord.Embed(title=embedTitle, color=self.embedColor)
-                await ctx.send(embed=embed)
-        elif task == "deleteafter":
-            arg = ""
-            if args[0] is None:
-                await ctx.send(embed=discord.Embed(title="Possible to set time in this commands",
-                                                   description=f"Command pattern is **{commandPrefix}settings** "
-                                                               f"**deleteAfter [command to set delete after time] **"
-                                                               f"[seconds]**")
-                               .add_field(name="repeat", value="delete repeat command message")
-                               .add_field(name="pause", value="delete pause command message")
-                               .add_field(name="skip", value="delete skip command message")
-                               .add_field(name="volume", value="delete volume command message"))
-            else:
-                arg = args[0].lower()
-
-            if arg == "repeat":
-                try:
-                    self.repeatDeleteAfter = int(args[1])
-                except Exception as e:
-                    print(f"Settings repeat delete after exc: {e}")
-                    await ctx.send(f"Could not convert given value [{args[1]}] to the integer")
-                await ctx.send(f"Repeat command delete time had been set to {self.repeatDeleteAfter} seconds")
-            elif arg == "pause":
-                try:
-                    self.repeatDeleteAfter = int(args[1])
-                except Exception as e:
-                    print(f"Settings pause delete after exc: {e}")
-                    await ctx.send(f"Could not convert given value [{args[1]}] to the integer")
-                await ctx.send(f"Pause command delete time had been set to {self.pauseDeleteAfter} seconds")
-            elif arg == "skip":
-                try:
-                    self.repeatDeleteAfter = int(args[1])
-                except Exception as e:
-                    print(f"Settings skip delete after exc: {e}")
-                    await ctx.send(f"Could not convert given value [{args[1]}] to the integer")
-                await ctx.send(f"Skip command delete time had been set to {self.skipDeleteAfter} seconds")
-            elif arg == "volume":
-                try:
-                    self.repeatDeleteAfter = int(args[1])
-                except Exception as e:
-                    print(f"Settings volume delete after exc: {e}")
-                    await ctx.send(f"Could not convert given value [{args[1]}] to the integer")
-                await ctx.send(f"Volume command delete time had been set to {self.volumeDeleteAfter} seconds")
-            else:
-                await ctx.send("No such command for delete after")
+            match task:
+                case "commandprefix":
+                    if not args:
+                        await ctx.send("Please give a prefix after [commandPrefix]", delete_after=5)
+                    else:
+                        commandPrefix = args[0]
+                        bot.command_prefix = commandPrefix
+                        await ctx.send(f"Your new command prefix is {args[0]}")
+                case "embedcolor":
+                    if not args:
+                        await ctx.send(embed=discord.Embed(title=f"Possible colors are",
+                                                           description=f"*blue\npurple\nred\norange\ngreen\nmagenta\n"
+                                                                       f"teal\ngold\nblue-purple\nlight-grey\n"
+                                                                       f"dark-blue\ndark-gold\ndark-green\n"
+                                                                       f"dark-purple\ndark-grey\ndark-magenta\n"
+                                                                       f"dark-orange\ndark-red\ndark-teal\n"
+                                                                       f"dark-theme*\nUse command "
+                                                                       f"__{commandPrefix}settings "
+                                                                       f"embedColor dark-purple__ to set embeds "
+                                                                       f"color",
+                                                           color=self.embedColor))
+                    else:
+                        color = args[0].lower()
+                        embedTitle = self.chooseEmbedColor(color)
+                        embed = discord.Embed(title=embedTitle, color=self.embedColor)
+                        await ctx.send(embed=embed)
+                case "deleteafter":
+                    if not args:
+                        await ctx.send(embed=discord.Embed(title="Possible to set time in this commands",
+                                                           description=f"Command pattern is "
+                                                                       f"**{commandPrefix}settings** "
+                                                                       f"**deleteAfter [command to set delete after "
+                                                                       f"time] ** [seconds]**")
+                                       .add_field(name="repeat", value="delete repeat command message")
+                                       .add_field(name="pause", value="delete pause command message")
+                                       .add_field(name="skip", value="delete skip command message")
+                                       .add_field(name="volume", value="delete volume command message"))
+                    else:
+                        arg = args[0].lower()
+                        match arg:
+                            case "repeat":
+                                try:
+                                    self.repeatDeleteAfter = int(args[1])
+                                except Exception as e:
+                                    print(f"Settings repeat delete after exc: {e}")
+                                    await ctx.send(f"Could not convert given value [{args[1]}] to the integer")
+                                await ctx.send(f"Repeat command delete time had been set to "
+                                               f"{self.repeatDeleteAfter} seconds")
+                            case "pause":
+                                try:
+                                    self.repeatDeleteAfter = int(args[1])
+                                except Exception as e:
+                                    print(f"Settings pause delete after exc: {e}")
+                                    await ctx.send(f"Could not convert given value [{args[1]}] to the integer")
+                                await ctx.send(f"Pause command delete time had been set to "
+                                               f"{self.pauseDeleteAfter} seconds")
+                            case "skip":
+                                try:
+                                    self.repeatDeleteAfter = int(args[1])
+                                except Exception as e:
+                                    print(f"Settings skip delete after exc: {e}")
+                                    await ctx.send(f"Could not convert given value [{args[1]}] to the integer")
+                                await ctx.send(f"Skip command delete time had been set to "
+                                               f"{self.skipDeleteAfter} seconds")
+                            case "volume":
+                                try:
+                                    self.repeatDeleteAfter = int(args[1])
+                                except Exception as e:
+                                    print(f"Settings volume delete after exc: {e}")
+                                    await ctx.send(f"Could not convert given value [{args[1]}] to the integer")
+                                await ctx.send(f"Volume command delete time had been set to "
+                                               f"{self.volumeDeleteAfter} seconds")
+                            case _:
+                                await ctx.send("No such command for delete after")
 
     def getInfo(self, query):
         with youtube_dl.YoutubeDL(self.ydlOptions) as ydl:
@@ -455,7 +465,7 @@ class Music(commands.Cog):
         return info
 
     @commands.command(pass_context=True, aliases=["PLAYLIST", "pl", "PL"])
-    async def playlist(self, ctx, task=None, title=None, *music):
+    async def playlist(self, ctx, task=None, title=None, *musicTitle):
         query = ""
 
         if task:
@@ -470,7 +480,7 @@ class Music(commands.Cog):
 
         myCursor = mySqlDB.cursor()
 
-        for word in music:
+        for word in musicTitle:
             query += f"{word} "
 
         if not task:
@@ -595,9 +605,8 @@ class Music(commands.Cog):
                        inline=False) \
             .add_field(name="CAPS LOCK", value="You can ignore register and use bot with enabled CAPS LOCK",
                        inline=False) \
-            .add_field(name="Youtube playlists",
-                       value=f'Currently are disabled',
-                       # , if you want to enable them, type "*{commandPrefix}settings*"'
+            .add_field(name=f"*{commandPrefix}enableYTPlaylists*",
+                       value=f"Enables/Disables youtube playlists",
                        inline=True)
         await ctx.send(embed=embed)
 
@@ -633,6 +642,9 @@ class Music(commands.Cog):
             .add_field(name=f"*{commandPrefix}playlist*",
                        value=f'Aliases are: "**{commandPrefix}PLAYLIST**", "**{commandPrefix}pl**", '
                              f'"**{commandPrefix}PL**"', inline=False) \
+            .add_field(name=f"*{commandPrefix}enableYTPlaylists*",
+                       value=f'Aliases are: "**{commandPrefix}EYTP**", "**{commandPrefix}eytp**"',
+                       inline=False) \
             .add_field(name=f"*{commandPrefix}extendedhelp*",
                        value=f'Aliases are: "**{commandPrefix}EXTENDEDHELP**", "**{commandPrefix}eh**", '
                              f'"**{commandPrefix}EH**", "**{commandPrefix}aliases**", "**{commandPrefix}ALIASES**"',
@@ -680,7 +692,9 @@ class Music(commands.Cog):
         embed = (discord.Embed(title="Music queue", color=self.embedColor)
                  .add_field(name="Playing now: ", value=playing, inline=False)
                  .add_field(name="Requested by", value=f"{ctx.author.mention}", inline=True)
-                 .add_field(name="Duration", value=self.songQueue[ctx.guild.id][0]['duration'], inline=True)
+                 .add_field(name="Duration",
+                            value=TimeManager.parseDuration(self.songQueue[ctx.guild.id][0]['duration']),
+                            inline=True)
                  .add_field(name="Queued: ", value=content, inline=False)
                  .set_thumbnail(url=self.songQueue[ctx.guild.id][0]["thumbnail"]))
         await ctx.send(embed=embed)
