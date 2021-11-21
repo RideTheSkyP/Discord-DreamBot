@@ -1,6 +1,5 @@
 import asyncio
 from datetime import datetime
-import requests
 import youtube_dl
 import discord
 from discord.ext import commands
@@ -24,12 +23,13 @@ token = open("token.txt", "r").read()
 #     ffmpegPathUrl = open("ffmpegPathUrl.txt", "r").read()
 #     dbCreds = open("dbCreds.txt", "r").read().split(";")
 
+# todo extract direct url to youtube from [query] and link it with music title [done]
+
 # todo Write to database playlist states, etc
 # todo launch player in threads [???]
 # todo launch on_message with asyncio coroutine that can notify functions when event (command invoked)
 # todo track command messages with on_message to remove rubbish
 # todo add spotify player [???]
-# todo extract direct url to youtube from [query] and link it with music title
 # todo list a youtube playlist with choice indices on play command
 # todo create channel [???]
 # todo fix when music looped, bot must leave after everyone leaves channel
@@ -64,6 +64,7 @@ class Music(commands.Cog):
         self.songQueue = {}
         self.musicTitles = {}
         self.message = {}
+        self.lastPlaylistInfo = {}
         self.embedColor = discord.Color.purple()
         self.ffmpegPathUrl = open("ffmpegPath.txt", "r").read()
         self.dbCreds = open("dbCreds.txt", "r").read().split(";")
@@ -143,32 +144,34 @@ class Music(commands.Cog):
 
     async def search(self, ctx, url):
         with youtube_dl.YoutubeDL(self.ydlOptions) as ydl:
-            try:
-                requests.get(url)
-            except:
-                if len(url) > 0:
-                    if validators.url(url[0]):
-                        info = ydl.extract_info(url[0], download=False)
-                    else:
-                        info = ydl.extract_info(f"ytsearch:{' '.join(url)}", download=False)
+            if len(url) > 0:
+                if validators.url(url[0]):
+                    info = ydl.extract_info(url[0], download=False)
+                else:
+                    info = ydl.extract_info(f"ytsearch:{' '.join(url)}", download=False)
+                return info
+            else:
+                await ctx.send
 
-            entries = enumerate(info["entries"]) if "_type" in info else [(0, info)]
-            for i, entry in entries:
-                if ctx.guild.id not in self.songQueue:
-                    self.songQueue[ctx.guild.id] = [entry]
-                    self.musicTitles[ctx.guild.id] = [entry["formats"][0]["url"]]
-                    continue
-                self.songQueue[ctx.guild.id].append(entry)
-                self.musicTitles[ctx.guild.id].append(entry["formats"][0]["url"])
+    def _fillSongQueue(self, ctx, info):
+        entries = enumerate(info["entries"]) if "_type" in info else [(0, info)]
+        for i, entry in entries:
+            if ctx.guild.id not in self.songQueue:
+                self.songQueue[ctx.guild.id] = [entry]
+                self.musicTitles[ctx.guild.id] = [entry["formats"][0]["url"]]
+                continue
+            self.songQueue[ctx.guild.id].append(entry)
+            self.musicTitles[ctx.guild.id].append(entry["formats"][0]["url"])
 
     @commands.command(pass_context=True, aliases=["PLAY", "p", "P"])
     async def play(self, ctx, *video: str):
-        await self.search(ctx, video)
+        songInfo = await self.search(ctx, video)
+        self._fillSongQueue(ctx, songInfo)
         channel = ctx.message.author.voice.channel
         voice = get(bot.voice_clients, guild=ctx.guild)
 
         if voice and voice.is_connected():
-            await voice.move_to(channel)
+            voice = await voice.move_to(channel)
         else:
             voice = await channel.connect()
 
@@ -191,7 +194,6 @@ class Music(commands.Cog):
             self.ffmpegOptions["before_options"] = f"-ss {self.skipToTime} -reconnect 1 " \
                                                    f"-reconnect_at_eof 1 -reconnect_streamed 1 " \
                                                    f"-reconnect_delay_max 5"
-            voice = get(bot.voice_clients, guild=ctx.guild)
             voice.is_paused()
 
             if self.loop is True:
@@ -216,13 +218,15 @@ class Music(commands.Cog):
                 del self.musicTitles[ctx.guild.id]
                 del self.message[ctx.guild.id]
                 asyncio.run_coroutine_threadsafe(voice.disconnect(), bot.loop)
-                asyncio.run_coroutine_threadsafe(self.message[ctx.guild.id].delete(), bot.loop)
                 self.loop = False
 
     def _playMusic(self, ctx, executable, source):
-        voice = get(bot.voice_clients, guild=ctx.guild)
-        voice.play(discord.FFmpegPCMAudio(executable=executable, source=source, **self.ffmpegOptions),
-                   after=lambda e: self.playNext(ctx))
+        try:
+            voice = get(bot.voice_clients, guild=ctx.guild)
+            voice.play(discord.FFmpegPCMAudio(executable=executable, source=source, **self.ffmpegOptions),
+                       after=lambda e: self.playNext(ctx))
+        except Exception as ex:
+            print(f"Play music error: {ex}.")
 
     @commands.command(pass_context=True, aliases=["REPEAT", "r", "R", "again", "AGAIN", "replay", "REPLAY"])
     async def repeat(self, ctx):
@@ -232,9 +236,9 @@ class Music(commands.Cog):
 
         try:
             if voice and voice.is_connected():
-                await voice.move_to(channel)
+                voice = await voice.move_to(channel)
             else:
-                voice = await channel.connect
+                voice = await channel.connect()
 
             if voice.is_playing():
                 self.songQueue[ctx.guild.id].insert(1, self.songQueue[ctx.guild.id][0])
@@ -276,6 +280,50 @@ class Music(commands.Cog):
         await ctx.send(f"**Youtube playlists {'disabled' if self.playlistDisabled else 'enabled'}**",
                        delete_after=self.pauseDeleteAfter)
 
+    @commands.command(pass_context=True, aliases=["selectsong", "SELECTSONG", "selectSong", "cs", "CS"])
+    async def chooseSongFromYoutubePlaylist(self, ctx, url, number=None, mode="playone"):
+        content, messageSize = "", 5
+        await ctx.send("Gathering info about playlist.", delete_after=self.pauseDeleteAfter)
+
+        if not validators.url(url):
+            await ctx.send("Please provide link to the youtube playlist.")
+
+        if ctx.guild.id in self.lastPlaylistInfo and url in self.lastPlaylistInfo[ctx.guild.id]:
+            playlistInfo = self.lastPlaylistInfo[ctx.guild.id][url]
+        else:
+            playlistInfo = await self.search(ctx, (url,))
+            self.lastPlaylistInfo[ctx.guild.id] = {url: playlistInfo}
+
+        entries = enumerate(playlistInfo["entries"]) if "_type" in playlistInfo else [(0, playlistInfo)]
+
+        if number is None:
+            for i, entry in entries:
+                content += "\n".join(
+                    [f" **{i + 1}:** [{entry['title']}]({entry['webpage_url']})\n"
+                     f"**Requested by:** {ctx.author.mention}   "
+                     f"**Duration:** {TimeManager.parseDuration(entry['duration'])}\n"])
+                if (i + 1) % messageSize == 0 or (i + 1) == len(playlistInfo["entries"]):
+                    embed = (discord.Embed(title="Playlist songs", color=self.embedColor)
+                             .add_field(name="Choose song to play: ", value=content, inline=False))
+                    await ctx.send(embed=embed)
+                    content = ""
+            await ctx.send("Please select a song number to play or start with.")
+
+        if mode in ["startwith", "sw", "SW"]:
+            if len(playlistInfo) <= int(number)-1:
+                await ctx.send("Please provide right song number.")
+            playlistInfo["entries"] = playlistInfo["entries"][int(number)-1:]
+            self._fillSongQueue(ctx, playlistInfo)
+            channel = ctx.message.author.voice.channel
+
+            voice = get(bot.voice_clients, guild=ctx.guild)
+            if voice and voice.is_connected():
+                await voice.move_to(channel)
+            else:
+                await channel.connect()
+            self._playMusic(ctx, self.ffmpegPathUrl, self.musicTitles[ctx.guild.id][0])
+            await self.edit_message(ctx)
+
     @commands.command(pass_context=True, aliases=["SKIP", "s", "S"])
     async def skip(self, ctx, time="0"):
         skipped = 0
@@ -307,9 +355,9 @@ class Music(commands.Cog):
         voice = get(bot.voice_clients, guild=ctx.guild)
 
         if voice and voice.is_connected():
-            await voice.move_to(channel)
+            voice = await voice.move_to(channel)
         else:
-            voice = await channel.connect
+            voice = await channel.connect()
 
         if voice.is_playing():
             self.songQueue[ctx.guild.id].insert(1, self.songQueue[ctx.guild.id][0])
@@ -448,19 +496,6 @@ class Music(commands.Cog):
                             case _:
                                 await ctx.send("No such command for delete after")
 
-    def getInfo(self, query):
-        with youtube_dl.YoutubeDL(self.ydlOptions) as ydl:
-            try:
-                requests.get(query)
-                # async with aiohttp.ClientSession() as session:
-                #     async with session.get(query) as r:
-                #         info = r
-            except:
-                info = ydl.extract_info(f"ytsearch:{query}", download=False)["entries"][0]
-            else:
-                info = ydl.extract_info(query, download=False)
-        return info
-
     @commands.command(pass_context=True, aliases=["PLAYLIST", "pl", "PL"])
     async def playlist(self, ctx, task=None, title=None, *musicTitle):
         query = ""
@@ -543,7 +578,7 @@ class Music(commands.Cog):
                 songsAmount = myCursor.fetchall()
 
                 if len(songsAmount) < 20:
-                    info = self.getInfo(query)
+                    info = await self.search(ctx, query)
 
                     if info["tags"] is not None:
                         for tag in info["tags"]:
@@ -655,11 +690,11 @@ class Music(commands.Cog):
 
     @commands.command(pass_context=True)
     async def hello(self, ctx):
-        await ctx.send(f"Hi {ctx.author}. Your server id is {ctx.guild.id}")
+        await ctx.send(f"Hi {ctx.author}. Your server id is {ctx.guild.id}.")
 
-    @commands.command(pass_context=True)
-    async def users(self, ctx):
-        await ctx.send(f"Number of users on server: {ctx.guild.member_count}")
+    @commands.command(pass_context=True, aliases=["USERSAMOUNT", "ua", "UA"])
+    async def usersAmount(self, ctx):
+        await ctx.send(f"Number of users on server: {ctx.guild.member_count}.")
 
     @commands.command(pass_context=True, aliases=["QUEUE", "q", "Q"])
     async def queue(self, ctx, page=1):
