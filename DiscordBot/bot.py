@@ -23,9 +23,6 @@ token = open("token.txt", "r").read()
 #     token = open("token.txt", "r").read()
 #     ffmpegPathUrl = open("ffmpegPathUrl.txt", "r").read()
 #     dbCreds = open("dbCreds.txt", "r").read().split(";")
-# todo In search leave only info gathering, edit message and embed move to [func] [done]
-# todo Make search func async by removing return stmt, move return to edit msg [done]
-# todo fix url with youtube playlists (currently playing 1st song in playlist, need to play exact one) [done]
 
 # todo Write to database playlist states, etc
 # todo launch player in threads [???]
@@ -60,7 +57,7 @@ class Music(commands.Cog):
         self.guildId = 0
         self.songIterator = 0
         self.skipToTime = 0
-        self.songStartTime = 0
+        self.songStartTime = datetime.now()
         self.repeatDeleteAfter, self.pauseDeleteAfter, self.skipDeleteAfter, self.volumeDeleteAfter = 5, 5, 25, 15
         self.loop = False
         self.playlistDisabled = False
@@ -153,16 +150,16 @@ class Music(commands.Cog):
                     if validators.url(url[0]):
                         info = ydl.extract_info(url[0], download=False)
                     else:
-                        info = ydl.extract_info(f"ytsearch:{url}", download=False)
+                        info = ydl.extract_info(f"ytsearch:{' '.join(url)}", download=False)
 
-            for i, entry in enumerate(info["entries"]):
-                if i == 0:
-                    if ctx.guild.id not in self.songQueue:
-                        self.songQueue[ctx.guild.id] = [entry]
-                        self.musicTitles[ctx.guild.id] = [entry["formats"][0]["url"]]
-                else:
-                    self.songQueue[ctx.guild.id].append(entry)
-                    self.musicTitles[ctx.guild.id].append(entry["formats"][0]["url"])
+            entries = enumerate(info["entries"]) if "_type" in info else [(0, info)]
+            for i, entry in entries:
+                if ctx.guild.id not in self.songQueue:
+                    self.songQueue[ctx.guild.id] = [entry]
+                    self.musicTitles[ctx.guild.id] = [entry["formats"][0]["url"]]
+                    continue
+                self.songQueue[ctx.guild.id].append(entry)
+                self.musicTitles[ctx.guild.id].append(entry["formats"][0]["url"])
 
     @commands.command(pass_context=True, aliases=["PLAY", "p", "P"])
     async def play(self, ctx, *video: str):
@@ -624,17 +621,19 @@ class Music(commands.Cog):
                        value=f'Aliases are: "**{commandPrefix}HELP**", "**{commandPrefix}h**", "**{commandPrefix}H**"',
                        inline=False) \
             .add_field(name=f"*{commandPrefix}repeat*",
-                       value=f'Aliases are: "**{commandPrefix}REPEAT**", "**{commandPrefix}r**", "**{commandPrefix}R**", '
-                             f'"**{commandPrefix}again**", "**{commandPrefix}AGAIN**", "**{commandPrefix}replay**", '
-                             f'"**{commandPrefix}REPLAY**"', inline=False) \
+                       value=f'Aliases are: "**{commandPrefix}REPEAT**", "**{commandPrefix}r**", '
+                             f'"**{commandPrefix}R**", "**{commandPrefix}again**", "**{commandPrefix}AGAIN**", '
+                             f'"**{commandPrefix}replay**", "**{commandPrefix}REPLAY**"', inline=False) \
             .add_field(name=f"*{commandPrefix}remove*",
-                       value=f'Aliases are: "**{commandPrefix}REMOVE**", "**{commandPrefix}rm**", "**{commandPrefix}RM**"',
+                       value=f'Aliases are: "**{commandPrefix}REMOVE**", "**{commandPrefix}rm**", '
+                             f'"**{commandPrefix}RM**"',
                        inline=False) \
             .add_field(name=f"*{commandPrefix}skip*",
                        value=f'Aliases are: "**{commandPrefix}SKIP**", "**{commandPrefix}s**", "**{commandPrefix}S**"',
                        inline=False) \
             .add_field(name=f"*{commandPrefix}skipto*",
-                       value=f'Aliases are: "**{commandPrefix}SKIPTO**", "**{commandPrefix}st**", "**{commandPrefix}ST**"',
+                       value=f'Aliases are: "**{commandPrefix}SKIPTO**", "**{commandPrefix}st**", '
+                             f'"**{commandPrefix}ST**"',
                        inline=False) \
             .add_field(name=f"*{commandPrefix}settings*",
                        value=f'Aliases are: "**{commandPrefix}SETTINGS**", "**{commandPrefix}set**", '
@@ -738,8 +737,8 @@ class Music(commands.Cog):
         guilds = []
         await bot.wait_until_ready()
 
-        for guildid in bot.guilds:
-            guilds.append(guildid.id)
+        for guildId in bot.guilds:
+            guilds.append(guildId.id)
 
         while not bot.is_closed():
             try:
@@ -772,7 +771,7 @@ bot.remove_command("help")
 
 @bot.event
 async def on_ready():
-    print(f"We have logged in as {bot.user}")
+    print(f"We have logged in as {bot.user}.")
     perms = discord.Permissions(permissions=8)
     inviteLink = discord.utils.oauth_url(bot.user.id, permissions=perms)
     print(f"Use this link to add bot to your server: {inviteLink}")
