@@ -24,6 +24,7 @@ token = open("token.txt", "r").read()
 #     dbCreds = open("dbCreds.txt", "r").read().split(";")
 
 # todo extract direct url to youtube from [query] and link it with music title [done]
+# todo join, rejoin, wait after everyone leaves, leave after no one mentions for some time || task ended [done]
 
 # todo Write to database playlist states, etc
 # todo launch player in threads [???]
@@ -829,13 +830,14 @@ async def on_ready():
 #             else:
 #                 await after.edit(nick="Nickname dream is reserved by bot, please change your role or nickname")
 
+@bot.event
+async def on_voice_state_update(member, before, after):
+    voice_state = member.guild.voice_client
+    if voice_state is None:
+        return
 
-# todo join, rejoin, wait after everyone leaves, leave after no one mentions for some time || task ended
-# @bot.event
-# async def on_voice_state_update(member, before, after):
-#     print("Channel {}\n {}\n {}\n".format(member, before, after))
-#     # if after.channel is None:
-#     #     asyncio.sleep(2)
+    if len(voice_state.channel.members) == 1:
+        await voice_state.disconnect()
 
 # @bot.event
 # async def on_member_join(member):
