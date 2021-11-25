@@ -85,7 +85,7 @@ class Music(commands.Cog):
             "extract_flat": False,
             "simulate": True,
             "prefer_ffmpeg": True,
-            "ffmpeg_location": self.ffmpegPathUrl
+            # "ffmpeg_location": self.ffmpegPathUrl
         }
         self.ffmpegOptions = {
             "before_options": f"-ss {self.skipToTime} "
