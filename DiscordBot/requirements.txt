@@ -4,5 +4,5 @@ mysql==0.0.2
 mysql-connector-python==8.0.22
 PyNaCl==1.4.0
 async-timeout==3.0.1
-youtube-dl==2021.2.10
+youtube-dl==2021.12.17
 discord==1.0.1
