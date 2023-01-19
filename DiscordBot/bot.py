@@ -422,80 +422,78 @@ class Music(commands.Cog):
             await ctx.send(embed=embed)
         else:
             task = task.lower()
-            match task:
-                case "commandprefix":
-                    if not args:
-                        await ctx.send("Please give a prefix after [commandPrefix]", delete_after=5)
+            if task == "commandprefix":
+                if not args:
+                    await ctx.send("Please give a prefix after [commandPrefix]", delete_after=5)
+                else:
+                    commandPrefix = args[0]
+                    bot.command_prefix = commandPrefix
+                    await ctx.send(f"Your new command prefix is {args[0]}")
+            elif task == "embedcolor":
+                if not args:
+                    await ctx.send(embed=discord.Embed(title=f"Possible colors are",
+                                                       description=f"*blue\npurple\nred\norange\ngreen\nmagenta\n"
+                                                                   f"teal\ngold\nblue-purple\nlight-grey\n"
+                                                                   f"dark-blue\ndark-gold\ndark-green\n"
+                                                                   f"dark-purple\ndark-grey\ndark-magenta\n"
+                                                                   f"dark-orange\ndark-red\ndark-teal\n"
+                                                                   f"dark-theme*\nUse command "
+                                                                   f"__{commandPrefix}settings "
+                                                                   f"embedColor dark-purple__ to set embeds "
+                                                                   f"color",
+                                                       color=self.embedColor))
+                else:
+                    color = args[0].lower()
+                    embedTitle = self.chooseEmbedColor(color)
+                    embed = discord.Embed(title=embedTitle, color=self.embedColor)
+                    await ctx.send(embed=embed)
+            elif task == "deleteafter":
+                if not args:
+                    await ctx.send(embed=discord.Embed(title="Possible to set time in this commands",
+                                                       description=f"Command pattern is "
+                                                                   f"**{commandPrefix}settings** "
+                                                                   f"**deleteAfter [command to set delete after "
+                                                                   f"time] ** [seconds]**")
+                                   .add_field(name="repeat", value="delete repeat command message")
+                                   .add_field(name="pause", value="delete pause command message")
+                                   .add_field(name="skip", value="delete skip command message")
+                                   .add_field(name="volume", value="delete volume command message"))
+                else:
+                    arg = args[0].lower()
+                    if arg == "repeat":
+                        try:
+                            self.repeatDeleteAfter = int(args[1])
+                        except Exception as e:
+                            print(f"Settings repeat delete after exc: {e}")
+                            await ctx.send(f"Could not convert given value [{args[1]}] to the integer")
+                        await ctx.send(f"Repeat command delete time had been set to "
+                                       f"{self.repeatDeleteAfter} seconds")
+                    elif arg == "pause":
+                        try:
+                            self.repeatDeleteAfter = int(args[1])
+                        except Exception as e:
+                            print(f"Settings pause delete after exc: {e}")
+                            await ctx.send(f"Could not convert given value [{args[1]}] to the integer")
+                        await ctx.send(f"Pause command delete time had been set to "
+                                       f"{self.pauseDeleteAfter} seconds")
+                    elif arg == "skip":
+                        try:
+                            self.repeatDeleteAfter = int(args[1])
+                        except Exception as e:
+                            print(f"Settings skip delete after exc: {e}")
+                            await ctx.send(f"Could not convert given value [{args[1]}] to the integer")
+                        await ctx.send(f"Skip command delete time had been set to "
+                                       f"{self.skipDeleteAfter} seconds")
+                    elif arg == "volume":
+                        try:
+                            self.repeatDeleteAfter = int(args[1])
+                        except Exception as e:
+                            print(f"Settings volume delete after exc: {e}")
+                            await ctx.send(f"Could not convert given value [{args[1]}] to the integer")
+                        await ctx.send(f"Volume command delete time had been set to "
+                                       f"{self.volumeDeleteAfter} seconds")
                     else:
-                        commandPrefix = args[0]
-                        bot.command_prefix = commandPrefix
-                        await ctx.send(f"Your new command prefix is {args[0]}")
-                case "embedcolor":
-                    if not args:
-                        await ctx.send(embed=discord.Embed(title=f"Possible colors are",
-                                                           description=f"*blue\npurple\nred\norange\ngreen\nmagenta\n"
-                                                                       f"teal\ngold\nblue-purple\nlight-grey\n"
-                                                                       f"dark-blue\ndark-gold\ndark-green\n"
-                                                                       f"dark-purple\ndark-grey\ndark-magenta\n"
-                                                                       f"dark-orange\ndark-red\ndark-teal\n"
-                                                                       f"dark-theme*\nUse command "
-                                                                       f"__{commandPrefix}settings "
-                                                                       f"embedColor dark-purple__ to set embeds "
-                                                                       f"color",
-                                                           color=self.embedColor))
-                    else:
-                        color = args[0].lower()
-                        embedTitle = self.chooseEmbedColor(color)
-                        embed = discord.Embed(title=embedTitle, color=self.embedColor)
-                        await ctx.send(embed=embed)
-                case "deleteafter":
-                    if not args:
-                        await ctx.send(embed=discord.Embed(title="Possible to set time in this commands",
-                                                           description=f"Command pattern is "
-                                                                       f"**{commandPrefix}settings** "
-                                                                       f"**deleteAfter [command to set delete after "
-                                                                       f"time] ** [seconds]**")
-                                       .add_field(name="repeat", value="delete repeat command message")
-                                       .add_field(name="pause", value="delete pause command message")
-                                       .add_field(name="skip", value="delete skip command message")
-                                       .add_field(name="volume", value="delete volume command message"))
-                    else:
-                        arg = args[0].lower()
-                        match arg:
-                            case "repeat":
-                                try:
-                                    self.repeatDeleteAfter = int(args[1])
-                                except Exception as e:
-                                    print(f"Settings repeat delete after exc: {e}")
-                                    await ctx.send(f"Could not convert given value [{args[1]}] to the integer")
-                                await ctx.send(f"Repeat command delete time had been set to "
-                                               f"{self.repeatDeleteAfter} seconds")
-                            case "pause":
-                                try:
-                                    self.repeatDeleteAfter = int(args[1])
-                                except Exception as e:
-                                    print(f"Settings pause delete after exc: {e}")
-                                    await ctx.send(f"Could not convert given value [{args[1]}] to the integer")
-                                await ctx.send(f"Pause command delete time had been set to "
-                                               f"{self.pauseDeleteAfter} seconds")
-                            case "skip":
-                                try:
-                                    self.repeatDeleteAfter = int(args[1])
-                                except Exception as e:
-                                    print(f"Settings skip delete after exc: {e}")
-                                    await ctx.send(f"Could not convert given value [{args[1]}] to the integer")
-                                await ctx.send(f"Skip command delete time had been set to "
-                                               f"{self.skipDeleteAfter} seconds")
-                            case "volume":
-                                try:
-                                    self.repeatDeleteAfter = int(args[1])
-                                except Exception as e:
-                                    print(f"Settings volume delete after exc: {e}")
-                                    await ctx.send(f"Could not convert given value [{args[1]}] to the integer")
-                                await ctx.send(f"Volume command delete time had been set to "
-                                               f"{self.volumeDeleteAfter} seconds")
-                            case _:
-                                await ctx.send("No such command for delete after")
+                        await ctx.send("No such command for delete after")
 
     @commands.command(pass_context=True, aliases=["PLAYLIST", "pl", "PL"])
     async def playlist(self, ctx, task=None, title=None, *musicTitle):
