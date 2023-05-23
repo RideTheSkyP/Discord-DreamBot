@@ -1,4 +1,4 @@
-requests==2.25.0
+requests==2.31.0
 discord.py==1.6.0
 mysql==0.0.2
 mysql-connector-python==8.0.22
