@@ -1,17 +1,18 @@
+import os
 import asyncio
 from datetime import datetime
-import youtube_dl
+import yt_dlp
 import discord
 from discord.ext import commands
 from discord.utils import get
-import mysql.connector
+# import mysql.connector
 import validators
 from timeManager import TimeManager
 
 # from player import Player
 
-token = open("token.txt", "r").read()
-
+# token = open("token.txt", "r").read()
+token = os.getenv("TOKEN")
 
 # @commands.guild_only()
 # @commands.check(audio_playing)
@@ -67,8 +68,8 @@ class Music(commands.Cog):
         self.message = {}
         self.lastPlaylistInfo = {}
         self.embedColor = discord.Color.purple()
-        self.ffmpegPathUrl = open("ffmpegPath.txt", "r").read()
-        self.dbCreds = open("dbCreds.txt", "r").read().split(";")
+        # self.ffmpegPathUrl = open("ffmpegPath.txt", "r").read()
+        # self.dbCreds = open("dbCreds.txt", "r").read().split(";")
         self.ydlOptions = {
             "format": "bestaudio",
             "noplaylist": self.playlistDisabled,
@@ -144,7 +145,7 @@ class Music(commands.Cog):
             self.message[ctx.guild.id] = await ctx.send(embed=embed)
 
     async def search(self, ctx, url):
-        with youtube_dl.YoutubeDL(self.ydlOptions) as ydl:
+        with yt_dlp.YoutubeDL(self.ydlOptions) as ydl:
             if len(url) > 0:
                 if validators.url(url[0]):
                     info = ydl.extract_info(url[0], download=False)
@@ -155,7 +156,9 @@ class Music(commands.Cog):
                 await ctx.send
 
     def _fillSongQueue(self, ctx, info):
+        print("_fillSongQueue")
         entries = enumerate(info["entries"]) if "_type" in info else [(0, info)]
+        print("entries", entries)
         for i, entry in entries:
             if ctx.guild.id not in self.songQueue:
                 self.songQueue[ctx.guild.id] = [entry]
@@ -167,18 +170,24 @@ class Music(commands.Cog):
     @commands.command(pass_context=True, aliases=["PLAY", "p", "P"])
     async def play(self, ctx, *video: str):
         songInfo = await self.search(ctx, video)
+        # print("songInfo", songInfo)
         self._fillSongQueue(ctx, songInfo)
+        # channel = ctx.message.author.voice.channel
+        # print("channel", channel)
+        voice_bot = get(bot.voice_clients, guild=ctx.guild)
         channel = ctx.message.author.voice.channel
-        voice = get(bot.voice_clients, guild=ctx.guild)
+        channel_id = channel.id
+        # voice_channel = client.get_channel(channel_id)
 
-        if voice and voice.is_connected():
-            voice = await voice.move_to(channel)
-        else:
-            voice = await channel.connect()
+        # if voice_bot and voice_bot.is_connected():
+        #     print('voice conn', channel)
+        #     voice = await voice_bot.move_to(channel)
+        # else:
+        voice = await channel.connect()
 
         if not voice.is_playing():
             self.songStartTime = datetime.now()
-            self._playMusic(ctx, self.ffmpegPathUrl, self.musicTitles[ctx.guild.id][0])
+            self._playMusic(ctx, self.musicTitles[ctx.guild.id][0])
             voice.is_playing()
             self.skipToTime = 0
         await self.edit_message(ctx)
@@ -212,7 +221,7 @@ class Music(commands.Cog):
 
                 asyncio.run_coroutine_threadsafe(self.edit_message(ctx), bot.loop)
                 self.songStartTime = datetime.now()
-                self._playMusic(ctx, self.ffmpegPathUrl, self.musicTitles[ctx.guild.id][0])
+                self._playMusic(ctx, self.musicTitles[ctx.guild.id][0])
                 voice.is_playing()
             else:
                 del self.songQueue[ctx.guild.id]
@@ -221,10 +230,10 @@ class Music(commands.Cog):
                 asyncio.run_coroutine_threadsafe(voice.disconnect(), bot.loop)
                 self.loop = False
 
-    def _playMusic(self, ctx, executable, source):
+    def _playMusic(self, ctx, source):
         try:
             voice = get(bot.voice_clients, guild=ctx.guild)
-            voice.play(discord.FFmpegPCMAudio(executable=executable, source=source, **self.ffmpegOptions),
+            voice.play(discord.FFmpegPCMAudio(source=source, **self.ffmpegOptions),
                        after=lambda e: self.playNext(ctx))
         except Exception as ex:
             print(f"Play music error: {ex}.")
@@ -251,7 +260,7 @@ class Music(commands.Cog):
             await ctx.send(f"Repeat requested by: {ctx.message.author}", delete_after=self.repeatDeleteAfter)
             await self.edit_message(ctx)
         except Exception as e:
-            print("Repeat exc:", e)
+            print(f"Repeat exc: {e}")
             await ctx.send("You're not connected to the voice channel or nothing playing now", delete_after=5)
 
     @commands.command(pass_context=True, aliases=["LOOP", "l", "L"])
@@ -322,7 +331,7 @@ class Music(commands.Cog):
                 await voice.move_to(channel)
             else:
                 await channel.connect()
-            self._playMusic(ctx, self.ffmpegPathUrl, self.musicTitles[ctx.guild.id][0])
+            self._playMusic(ctx, self.musicTitles[ctx.guild.id][0])
             await self.edit_message(ctx)
 
     @commands.command(pass_context=True, aliases=["SKIP", "s", "S"])
@@ -495,119 +504,119 @@ class Music(commands.Cog):
                     else:
                         await ctx.send("No such command for delete after")
 
-    @commands.command(pass_context=True, aliases=["PLAYLIST", "pl", "PL"])
-    async def playlist(self, ctx, task=None, title=None, *musicTitle):
-        query = ""
-
-        if task:
-            task = task.lower()
-
-        mySqlDB = mysql.connector.connect(
-            host=self.dbCreds[0],
-            user=self.dbCreds[1],
-            password=self.dbCreds[2],
-            database=self.dbCreds[3]
-        )
-
-        myCursor = mySqlDB.cursor()
-
-        for word in musicTitle:
-            query += f"{word} "
-
-        if not task:
-            embed = discord.Embed(title="Playlist commands description",
-                                  description=f"The pattern of command is\n**{commandPrefix}playlist [task] "
-                                              f"[playlist title] [music title]**", color=self.embedColor) \
-                .add_field(name=f"{commandPrefix}playlist show", value=f"Shows server playlists", inline=False) \
-                .add_field(name=f"{commandPrefix}playlist show [playlist title]",
-                           value=f"Shows all tracks from playlist") \
-                .add_field(name=f"{commandPrefix}playlist play [playlist title]",
-                           value=f"Plays all tracks from playlist",
-                           inline=False) \
-                .add_field(name=f"{commandPrefix}playlist add [playlist title] [music]",
-                           value=f"Adds music to playlist") \
-                .add_field(name=f"{commandPrefix}playlist delete [playlist title]", value=f"Deletes playlist",
-                           inline=False) \
-                .add_field(name=f"{commandPrefix}playlist delete [playlist title] [music]",
-                           value=f"Deletes song from playlist")
-            await ctx.send(embed=embed)
-        elif task == "play":
-            if title:
-                sqlQuery = "SELECT DISTINCT query FROM playlists WHERE guildId=%s AND playlistTitle=%s"
-                values = (ctx.guild.id, title)
-                myCursor.execute(sqlQuery, values)
-                records = myCursor.fetchall()
-                for row in records:
-                    await self.play(ctx, row[0])
-            else:
-                await ctx.send("Please decide which playlist to play")
-                await self.playlist(ctx, "show")
-        elif task == "show":
-            if not title:
-                playlists = ""
-                sqlQuery = "SELECT DISTINCT playlistTitle FROM playlists WHERE guildId=%s"
-                values = (ctx.guild.id,)
-                myCursor.execute(sqlQuery, values)
-                records = myCursor.fetchall()
-                for row in records:
-                    playlists += f"*{row[0]}*\n"
-                embed = discord.Embed(title="Server playlists", description=f"{playlists}", color=self.embedColor)
-                await ctx.send(embed=embed)
-            else:
-                songs = ""
-                sqlQuery = "SELECT DISTINCT query FROM playlists WHERE guildId=%s AND playlistTitle=%s"
-                values = (ctx.guild.id, title)
-                myCursor.execute(sqlQuery, values)
-                records = myCursor.fetchall()
-                for row in records:
-                    songs += f"{row[0]}\n"
-                embed = discord.Embed(title=f"*{title}* playlist music", description=f"{songs}", color=self.embedColor)
-                await ctx.send(embed=embed)
-        elif task == "add":
-            tags = ""
-            sqlQuery = "SELECT DISTINCT playlistTitle FROM playlists WHERE guildId=%s"
-            values = (ctx.guild.id,)
-            myCursor.execute(sqlQuery, values)
-            playlistsAmount = myCursor.fetchall()
-
-            if len(playlistsAmount) < 3:
-                sqlQuery = "SELECT DISTINCT query FROM playlists WHERE guildId=%s AND playlistTitle=%s"
-                values = (ctx.guild.id, title)
-                myCursor.execute(sqlQuery, values)
-                songsAmount = myCursor.fetchall()
-
-                if len(songsAmount) < 20:
-                    info = await self.search(ctx, query)
-
-                    if info["tags"] is not None:
-                        for tag in info["tags"]:
-                            if len(tags) < 200:
-                                tags += f"{tag} "
-
-                    sqlQuery = "INSERT INTO playlists (guildId, playlistTitle, query, genre) VALUES (%s, %s, %s, %s)"
-                    values = (ctx.guild.id, title, query, tags)
-                    myCursor.execute(sqlQuery, values)
-                    mySqlDB.commit()
-                    await ctx.send(f"Song {query} has been added to playlist {title}")
-                else:
-                    await ctx.send(f"Max amount of songs is 20")
-            else:
-                await ctx.send("Max amount of playlists is 3")
-        elif task == "delete":
-            if not music:
-                sqlQuery = "DELETE FROM playlists WHERE guildId=%s AND playlistTitle=%s LIMIT 1"
-                values = (ctx.guild.id, title)
-                myCursor.execute(sqlQuery, values)
-                mySqlDB.commit()
-                await ctx.send(f"Playlist *{title}* is deleted")
-            else:
-                sqlQuery = "DELETE FROM playlists WHERE guildId=%s AND playlistTitle=%s AND query=%s LIMIT 1"
-                values = (ctx.guild.id, title, query)
-                myCursor.execute(sqlQuery, values)
-                mySqlDB.commit()
-                await ctx.send(f"From playlist *{title}* is deleted {query}")
-        else:
-            await ctx.send("No such command")
+    # @commands.command(pass_context=True, aliases=["PLAYLIST", "pl", "PL"])
+    # async def playlist(self, ctx, task=None, title=None, *musicTitle):
+    #     query = ""
+    #
+    #     if task:
+    #         task = task.lower()
+    #
+    #     mySqlDB = mysql.connector.connect(
+    #         host=self.dbCreds[0],
+    #         user=self.dbCreds[1],
+    #         password=self.dbCreds[2],
+    #         database=self.dbCreds[3]
+    #     )
+    #
+    #     myCursor = mySqlDB.cursor()
+    #
+    #     for word in musicTitle:
+    #         query += f"{word} "
+    #
+    #     if not task:
+    #         embed = discord.Embed(title="Playlist commands description",
+    #                               description=f"The pattern of command is\n**{commandPrefix}playlist [task] "
+    #                                           f"[playlist title] [music title]**", color=self.embedColor) \
+    #             .add_field(name=f"{commandPrefix}playlist show", value=f"Shows server playlists", inline=False) \
+    #             .add_field(name=f"{commandPrefix}playlist show [playlist title]",
+    #                        value=f"Shows all tracks from playlist") \
+    #             .add_field(name=f"{commandPrefix}playlist play [playlist title]",
+    #                        value=f"Plays all tracks from playlist",
+    #                        inline=False) \
+    #             .add_field(name=f"{commandPrefix}playlist add [playlist title] [music]",
+    #                        value=f"Adds music to playlist") \
+    #             .add_field(name=f"{commandPrefix}playlist delete [playlist title]", value=f"Deletes playlist",
+    #                        inline=False) \
+    #             .add_field(name=f"{commandPrefix}playlist delete [playlist title] [music]",
+    #                        value=f"Deletes song from playlist")
+    #         await ctx.send(embed=embed)
+    #     elif task == "play":
+    #         if title:
+    #             sqlQuery = "SELECT DISTINCT query FROM playlists WHERE guildId=%s AND playlistTitle=%s"
+    #             values = (ctx.guild.id, title)
+    #             myCursor.execute(sqlQuery, values)
+    #             records = myCursor.fetchall()
+    #             for row in records:
+    #                 await self.play(ctx, row[0])
+    #         else:
+    #             await ctx.send("Please decide which playlist to play")
+    #             await self.playlist(ctx, "show")
+    #     elif task == "show":
+    #         if not title:
+    #             playlists = ""
+    #             sqlQuery = "SELECT DISTINCT playlistTitle FROM playlists WHERE guildId=%s"
+    #             values = (ctx.guild.id,)
+    #             myCursor.execute(sqlQuery, values)
+    #             records = myCursor.fetchall()
+    #             for row in records:
+    #                 playlists += f"*{row[0]}*\n"
+    #             embed = discord.Embed(title="Server playlists", description=f"{playlists}", color=self.embedColor)
+    #             await ctx.send(embed=embed)
+    #         else:
+    #             songs = ""
+    #             sqlQuery = "SELECT DISTINCT query FROM playlists WHERE guildId=%s AND playlistTitle=%s"
+    #             values = (ctx.guild.id, title)
+    #             myCursor.execute(sqlQuery, values)
+    #             records = myCursor.fetchall()
+    #             for row in records:
+    #                 songs += f"{row[0]}\n"
+    #             embed = discord.Embed(title=f"*{title}* playlist music", description=f"{songs}", color=self.embedColor)
+    #             await ctx.send(embed=embed)
+    #     elif task == "add":
+    #         tags = ""
+    #         sqlQuery = "SELECT DISTINCT playlistTitle FROM playlists WHERE guildId=%s"
+    #         values = (ctx.guild.id,)
+    #         myCursor.execute(sqlQuery, values)
+    #         playlistsAmount = myCursor.fetchall()
+    #
+    #         if len(playlistsAmount) < 3:
+    #             sqlQuery = "SELECT DISTINCT query FROM playlists WHERE guildId=%s AND playlistTitle=%s"
+    #             values = (ctx.guild.id, title)
+    #             myCursor.execute(sqlQuery, values)
+    #             songsAmount = myCursor.fetchall()
+    #
+    #             if len(songsAmount) < 20:
+    #                 info = await self.search(ctx, query)
+    #
+    #                 if info["tags"] is not None:
+    #                     for tag in info["tags"]:
+    #                         if len(tags) < 200:
+    #                             tags += f"{tag} "
+    #
+    #                 sqlQuery = "INSERT INTO playlists (guildId, playlistTitle, query, genre) VALUES (%s, %s, %s, %s)"
+    #                 values = (ctx.guild.id, title, query, tags)
+    #                 myCursor.execute(sqlQuery, values)
+    #                 mySqlDB.commit()
+    #                 await ctx.send(f"Song {query} has been added to playlist {title}")
+    #             else:
+    #                 await ctx.send(f"Max amount of songs is 20")
+    #         else:
+    #             await ctx.send("Max amount of playlists is 3")
+    #     elif task == "delete":
+    #         if not music:
+    #             sqlQuery = "DELETE FROM playlists WHERE guildId=%s AND playlistTitle=%s LIMIT 1"
+    #             values = (ctx.guild.id, title)
+    #             myCursor.execute(sqlQuery, values)
+    #             mySqlDB.commit()
+    #             await ctx.send(f"Playlist *{title}* is deleted")
+    #         else:
+    #             sqlQuery = "DELETE FROM playlists WHERE guildId=%s AND playlistTitle=%s AND query=%s LIMIT 1"
+    #             values = (ctx.guild.id, title, query)
+    #             myCursor.execute(sqlQuery, values)
+    #             mySqlDB.commit()
+    #             await ctx.send(f"From playlist *{title}* is deleted {query}")
+    #     else:
+    #         await ctx.send("No such command")
 
     @commands.command(pass_context=True, aliases=["HELP", "h", "H"])
     async def help(self, ctx):
@@ -748,7 +757,7 @@ class Music(commands.Cog):
     @skipto.error
     @queue.error
     @settings.error
-    @playlist.error
+    # @playlist.error
     @remove.error
     @volume.error
     async def errorHandler(self, ctx, error):
@@ -854,6 +863,6 @@ async def on_voice_state_update(member, before, after):
 if __name__ == "__main__":
     bot.add_cog(Music(bot))
     music = Music(bot)
-    bot.loop.create_task(music.clearDatabase())
+    # bot.loop.create_task(music.clearDatabase())
     # bot.loop.create_task(update_stats())
     bot.run(token)
