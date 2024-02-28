@@ -4,7 +4,6 @@ from datetime import datetime
 import yt_dlp
 import discord
 from discord.ext import commands
-from discord.utils import get
 # import mysql.connector
 import validators
 from timeManager import TimeManager
@@ -97,9 +96,10 @@ class Music(commands.Cog):
 
     @commands.command(pass_context=True)
     async def join(self, ctx):
+        print("join")
         await ctx.channel.purge(limit=1)
         channel = ctx.message.author.voice.channel
-        voice = get(bot.voice_clients, guild=ctx.guild)
+        voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
 
         if voice and voice.is_connected():
             await voice.move_to(channel)
@@ -112,7 +112,7 @@ class Music(commands.Cog):
     async def leave(self, ctx):
         await ctx.channel.purge(limit=1)
         channel = ctx.message.author.voice.channel
-        voice = get(bot.voice_clients, guild=ctx.guild)
+        voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
         self.songQueue[ctx.guild.id], self.musicTitles[ctx.guild.id] = [], []
 
         if voice and voice.is_connected():
@@ -169,13 +169,16 @@ class Music(commands.Cog):
 
     @commands.command(pass_context=True, aliases=["PLAY", "p", "P"])
     async def play(self, ctx, *video: str):
+        print("PLAY", *video)
         songInfo = await self.search(ctx, video)
+        print("songInfo", songInfo)
         # print("songInfo", songInfo)
         self._fillSongQueue(ctx, songInfo)
         # channel = ctx.message.author.voice.channel
         # print("channel", channel)
-        voice_bot = get(bot.voice_clients, guild=ctx.guild)
+        voice_bot = discord.utils.get(bot.voice_clients, guild=ctx.guild)
         channel = ctx.message.author.voice.channel
+        print("channel", channel)
         channel_id = channel.id
         # voice_channel = client.get_channel(channel_id)
 
@@ -193,7 +196,7 @@ class Music(commands.Cog):
         await self.edit_message(ctx)
 
     def playNext(self, ctx):
-        voice = get(bot.voice_clients, guild=ctx.guild)
+        voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
         if voice is None:
             del self.songQueue[ctx.guild.id]
             del self.musicTitles[ctx.guild.id]
@@ -232,7 +235,7 @@ class Music(commands.Cog):
 
     def _playMusic(self, ctx, source):
         try:
-            voice = get(bot.voice_clients, guild=ctx.guild)
+            voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
             voice.play(discord.FFmpegPCMAudio(source=source, **self.ffmpegOptions),
                        after=lambda e: self.playNext(ctx))
         except Exception as ex:
@@ -242,7 +245,9 @@ class Music(commands.Cog):
     async def repeat(self, ctx):
         await ctx.channel.purge(limit=1)
         channel = ctx.message.author.voice.channel
-        voice = get(bot.voice_clients, guild=ctx.guild)
+        channel_id = channel.id
+        # voice_channel = client.get_channel(channel_id)
+        voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
 
         try:
             if voice and voice.is_connected():
@@ -272,7 +277,7 @@ class Music(commands.Cog):
     @commands.command(pass_context=True, aliases=["PAUSE", "stop", "STOP", "resume", "RESUME", "shutup", "SHUTUP"])
     async def pause(self, ctx):
         await ctx.channel.purge(limit=1)
-        voice = get(bot.voice_clients, guild=ctx.guild)
+        voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
 
         if voice.is_connected():
             if voice.is_playing():
@@ -326,7 +331,7 @@ class Music(commands.Cog):
             self._fillSongQueue(ctx, playlistInfo)
             channel = ctx.message.author.voice.channel
 
-            voice = get(bot.voice_clients, guild=ctx.guild)
+            voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
             if voice and voice.is_connected():
                 await voice.move_to(channel)
             else:
@@ -338,7 +343,7 @@ class Music(commands.Cog):
     async def skip(self, ctx, time="0"):
         skipped = 0
         requestTime = self.songStartTime - datetime.now()
-        voice = get(bot.voice_clients, guild=ctx.guild)
+        voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
 
         try:
             if int(time) == 0:
@@ -362,7 +367,7 @@ class Music(commands.Cog):
     async def skipto(self, ctx, time):
         await ctx.channel.purge(limit=1)
         channel = ctx.message.author.voice.channel
-        voice = get(bot.voice_clients, guild=ctx.guild)
+        voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
 
         if voice and voice.is_connected():
             voice = await voice.move_to(channel)
@@ -707,7 +712,7 @@ class Music(commands.Cog):
     @commands.command(pass_context=True, aliases=["QUEUE", "q", "Q"])
     async def queue(self, ctx, page=1):
         await ctx.channel.purge(limit=1)
-        voice = get(bot.voice_clients, guild=ctx.guild)
+        voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
         playing, content, pg, iterator, queueSize = "", "", 0, 0, 5
         page = page - 1
 
@@ -744,7 +749,7 @@ class Music(commands.Cog):
     @commands.command(pass_context=True, aliases=["VOLUME", "vol", "VOL"])
     async def volume(self, ctx, volume: int):
         await ctx.channel.purge(limit=1)
-        voice = get(bot.voice_clients, guild=ctx.guild)
+        voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
         voice.source = discord.PCMVolumeTransformer(voice.source)
         voice.source.volume = volume / 100
         await ctx.send(f"Volume changed to {volume}%", delete_after=self.volumeDeleteAfter)
@@ -808,7 +813,7 @@ class Music(commands.Cog):
 
 
 commandPrefix = "."
-bot = commands.Bot(command_prefix=commands.when_mentioned_or(commandPrefix))
+bot = commands.Bot(command_prefix=commands.when_mentioned_or(commandPrefix), intents=discord.Intents.default())
 bot.remove_command("help")
 
 
@@ -860,9 +865,20 @@ async def on_voice_state_update(member, before, after):
 # async def on_server_join():
 #     pass
 
+
+async def main():
+    async with bot:
+        await bot.add_cog(Music(bot))
+        await bot.start(token)
+
+
+# async def main():
+#     await bot.add_cog(Music(bot))
+#     # music = Music(bot)
+#     # bot.loop.create_task(music.clearDatabase())
+#     # bot.loop.create_task(update_stats())
+#     bot.run(token)
+
+
 if __name__ == "__main__":
-    bot.add_cog(Music(bot))
-    music = Music(bot)
-    # bot.loop.create_task(music.clearDatabase())
-    # bot.loop.create_task(update_stats())
-    bot.run(token)
+    asyncio.run(main())
