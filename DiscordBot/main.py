@@ -15,9 +15,11 @@ intents.voice_states = True
 with open('token.txt', 'r') as f:
     token = f.read()
 
+
 bot = commands.Bot(
     command_prefix=commands.when_mentioned_or('.'),
     description='Music bot',
+    case_insensitive=True,
     intents=intents
 )
 
@@ -25,21 +27,24 @@ bot = commands.Bot(
 @bot.event
 async def on_ready():
     print(f'Logged in as {bot.user} (ID: {bot.user.id})')
-    synced = await bot.tree.sync()
+    clear = bot.tree.clear_commands(guild=discord.Object(GUILD_ID))
+    print('clear', clear)
+    synced = await bot.tree.sync(guild=discord.Object(GUILD_ID))
     print('synced', synced)
     print('tree', bot.tree, vars(bot.tree))
-    # await bot.tree.sync()  # Sync the command tree with Discord
-    # print('tree', bot.tree, vars(bot.tree))
+    print('comms', bot.tree.get_commands())
+    print('comms guild', bot.tree.get_commands(guild=discord.Object(GUILD_ID)))
 
 
 @bot.command(name='sync')
 async def sync(ctx):
-    synced = await bot.tree.sync()
+    print('sync ctx', ctx, ctx.guild, ctx.guild.id)
+    synced = await bot.tree.sync(guild=ctx.guild)
     print('synced', synced)
 
 
 async def load():
-    await bot.load_extension(f'music_cog')
+    await bot.load_extension('music_cog')
 
 
 async def main():
