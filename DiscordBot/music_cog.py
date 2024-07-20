@@ -64,13 +64,15 @@ class Music(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.queue = {}
+        self.embed_messages = {}
 
     # @commands.Cog.listener()
     # async def on_ready(self):
     #     print("Syncing Bot Tree")
     #     await self.bot.tree.sync()
 
-    async def _join(self, interaction: discord.Interaction):
+    @staticmethod
+    async def _join(interaction: discord.Interaction):
         voice = interaction.user.voice
         if voice is None or voice.channel is None:
             await interaction.response.send_message('You are not connected to a voice channel.', ephemeral=True)
@@ -97,12 +99,15 @@ class Music(commands.Cog):
         else:
             await interaction.response.send_message('Bot is not in a voice channel', ephemeral=True)
 
+    def edit_embed_message(self):
+        pass
+
     def _add_to_song_queue(self, guild_id, player):
         if guild_id not in self.queue:
             self.queue[guild_id] = []
         self.queue[guild_id].append(player)
 
-    def play_next(self, voice_client):
+    async def play_next(self, voice_client):
         guild_id = voice_client.guild.id
         if guild_id in self.queue and self.queue[guild_id]:
             player = self.queue[guild_id].pop(0)
@@ -112,29 +117,47 @@ class Music(commands.Cog):
             if not voice_client.is_connected() and not (voice_client.is_playing() or voice_client.is_paused()):
                 await asyncio.sleep(150)
                 if not self.queue.get(guild_id) and voice_client.is_connected() and not (voice_client.is_playing() or voice_client.is_paused()):
-                    await voice_client.disconnect()
+                     await voice_client.disconnect()
 
-    @app_commands.command(name='play', description='Make the bot play music from query or url')
+    @app_commands.command(name='play', description='Play music from query or url')
     async def play(self, interaction: discord.Interaction, query: str):
-        """Plays from a url (almost anything youtube_dl supports)"""
         await interaction.response.defer()
         await self._join(interaction)
         guild_id = interaction.guild.id
         voice_client = interaction.guild.voice_client
         player = await YTDLSource.from_url(query, loop=self.bot.loop)
+        self._add_to_song_queue(guild_id, player)
 
         try:
-            if voice_client.is_connected() and (guild_id in self.queue):
-                self._add_to_song_queue(guild_id, player)
-                await interaction.followup.send(f'Added {player.title} to the queue', ephemeral=False)
+            if voice_client.is_playing() or voice_client.is_paused():
+                print('connected')
+                await interaction.followup.send(f'Added {player.title} to the queue')
                 print(f'[{voice_client.guild.name}|{voice_client.channel.name}] Added {player.title} to the queue')
             else:
-                voice_client.play(player, after=lambda e: self.bot.loop.create_task(self.play_next(voice_client)))
-                await interaction.followup.send_message(f'Playing: {player.title}')
+                print('play')
+                voice_client.play(self.queue[guild_id].pop(0), after=lambda e: self.bot.loop.create_task(self.play_next(voice_client)))
+                print('created', dir(interaction.followup))
+                await interaction.followup.send(f'Playing: {player.title}')
                 print(f'[{voice_client.guild.name}|{voice_client.channel.name}] Playing: {player.title}')
         except Exception as e:
             print(f'Exception: {e}')
-            await interaction.response.send_message(f'Error occurred: {e}')
+            await interaction.followup.send(f'Error occurred: {e}')
+
+    @app_commands.command(name='pause', description='Pause or unpause current music')
+    async def pause(self, interaction: discord.Interaction):
+        pass
+
+    @app_commands.command(name='skip', description='Skip current music')
+    async def skip(self, interaction: discord.Interaction):
+        pass
+
+    @app_commands.command(name='loop', description='Loop current queue')
+    async def loop(self, interaction: discord.Interaction):
+        pass
+
+    @app_commands.command(name='remove', description='Removes chosen music from queue')
+    async def remove_from_queue(self, interaction: discord.Interaction):
+        pass
 
 
 async def setup(bot):

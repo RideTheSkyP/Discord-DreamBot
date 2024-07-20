@@ -2,6 +2,8 @@
 .fleet
 DiscordBot/token.txt
 DiscordBot/.idea
+DiscordBot/test.py
+DiscordBot/bot.py
 DiscordBot/dbCreds.txt
 DiscordBot/__pycache__
 DiscordBot/ffmpegPath.txt
