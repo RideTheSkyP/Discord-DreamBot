@@ -20,7 +20,7 @@ ytdl_format_options = {
     'ignoreerrors': False,
     'logtostderr': False,
     'extract_flat': False,
-    'simulate': True,
+    # 'simulate': True,
     'prefer_ffmpeg': True,
     'quiet': True,
     # 'no_warnings': True,
@@ -113,21 +113,21 @@ class Music(commands.Cog):
             player = self.queue[guild_id].pop(0)
             voice_client.play(player, after=lambda e: self.bot.loop.create_task(self.play_next(voice_client)) if e is None else print(f'[{voice_client.guild.name}/{voice_client.channel.name}] Player error: {e}'))
             print(f'[{voice_client.guild.name}|{voice_client.channel.name}] Now playing next song in queue: {player.title}')
+            # await self.update_player_embed(guild_id, player)
         else:
             if not voice_client.is_connected() and not (voice_client.is_playing() or voice_client.is_paused()):
                 await asyncio.sleep(150)
                 if not self.queue.get(guild_id) and voice_client.is_connected() and not (voice_client.is_playing() or voice_client.is_paused()):
-                     await voice_client.disconnect()
+                    # if guild_id in self.current_embed_messages:
+                    #     try:
+                    #         await self.current_embed_messages[guild_id].delete()
+                    #     except discord.errors.NotFound:
+                    #         pass  # Handle case where message is already deleted or doesn't exist
+                    await voice_client.disconnect()
 
-    @app_commands.command(name='play', description='Play music from query or url')
-    async def play(self, interaction: discord.Interaction, query: str):
-        await interaction.response.defer()
-        await self._join(interaction)
+    async def _play(self, player, interaction: discord.Interaction):
         guild_id = interaction.guild.id
         voice_client = interaction.guild.voice_client
-        player = await YTDLSource.from_url(query, loop=self.bot.loop)
-        self._add_to_song_queue(guild_id, player)
-
         try:
             if voice_client.is_playing() or voice_client.is_paused():
                 print('connected')
@@ -143,9 +143,24 @@ class Music(commands.Cog):
             print(f'Exception: {e}')
             await interaction.followup.send(f'Error occurred: {e}')
 
+    @app_commands.command(name='play', description='Play music from query or url')
+    async def play(self, interaction: discord.Interaction, query: str):
+        await interaction.response.defer()
+        await self._join(interaction)
+        guild_id = interaction.guild.id
+        player = await YTDLSource.from_url(query, loop=self.bot.loop)
+        self._add_to_song_queue(guild_id, player)
+        await self._play(player, interaction)
+
     @app_commands.command(name='pause', description='Pause or unpause current music')
     async def pause(self, interaction: discord.Interaction):
-        pass
+        voice_client = interaction.guild.voice_client
+        if voice_client.is_playing():
+            voice_client.stop()
+            await interaction.response.send_message('Paused', delete_after=5)
+        elif voice_client.is_paused():
+            voice_client.resume()
+            await interaction.response.send_message('Resumed', delete_after=5)
 
     @app_commands.command(name='skip', description='Skip current music')
     async def skip(self, interaction: discord.Interaction):
