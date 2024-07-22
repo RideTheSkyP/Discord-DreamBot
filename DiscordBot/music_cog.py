@@ -164,7 +164,17 @@ class Music(commands.Cog):
 
     @app_commands.command(name='skip', description='Skip current music')
     async def skip(self, interaction: discord.Interaction):
-        pass
+        guild_id = interaction.guild.id
+        voice_client = interaction.guild.voice_client
+        if not voice_client or not voice_client.is_connected():
+            await interaction.response.send_message('Bot is not connected to voice channel', delete_after=5)
+            return False
+        if voice_client.is_playing():
+            voice_client.stop()
+        if self.queue.get(guild_id):
+            await self._play(self.queue.get(guild_id).pop(0), interaction)
+        else:
+            await voice_client.disconnect(force=True)
 
     @app_commands.command(name='loop', description='Loop current queue')
     async def loop(self, interaction: discord.Interaction):
