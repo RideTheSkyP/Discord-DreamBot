@@ -20,7 +20,7 @@ ytdl_format_options = {
     'ignoreerrors': False,
     'logtostderr': False,
     'extract_flat': False,
-    # 'simulate': True,
+    'simulate': True,
     'prefer_ffmpeg': True,
     'quiet': True,
     # 'no_warnings': True,
@@ -37,7 +37,9 @@ ytdl_format_options = {
 #         }
 
 ffmpeg_options = {
-    'options': '-vn',
+    'before_options': f'-reconnect 1 -reconnect_at_eof 1 '
+                      f'-reconnect_streamed 1 -reconnect_delay_max 5',
+    'options': '-vn -sn -dn',
 }
 
 ytdl = yt_dlp.YoutubeDL(ytdl_format_options)
@@ -63,6 +65,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
 class Music(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.loop = False
         self.queue = {}
         self.embed_messages = {}
 
@@ -106,12 +109,14 @@ class Music(commands.Cog):
         if guild_id not in self.queue:
             self.queue[guild_id] = []
         self.queue[guild_id].append(player)
+        print('_add_to_song_queue', self.queue)
 
     async def play_next(self, voice_client):
+        print('Play next called')
         guild_id = voice_client.guild.id
         if guild_id in self.queue and self.queue[guild_id]:
             player = self.queue[guild_id].pop(0)
-            voice_client.play(player, after=lambda e: self.bot.loop.create_task(self.play_next(voice_client)) if e is None else print(f'[{voice_client.guild.name}/{voice_client.channel.name}] Player error: {e}'))
+            voice_client.play(player, after=lambda e: self.bot.loop.create_task(self.play_next(voice_client)) if e is None else print(f'[{voice_client.guild.name}|{voice_client.channel.name}] Player error: {e}'))
             print(f'[{voice_client.guild.name}|{voice_client.channel.name}] Now playing next song in queue: {player.title}')
             # await self.update_player_embed(guild_id, player)
         else:
@@ -126,19 +131,13 @@ class Music(commands.Cog):
                     await voice_client.disconnect()
 
     async def _play(self, player, interaction: discord.Interaction):
-        guild_id = interaction.guild.id
+        print('_play', player.title)
         voice_client = interaction.guild.voice_client
         try:
-            if voice_client.is_playing() or voice_client.is_paused():
-                print('connected')
-                await interaction.followup.send(f'Added {player.title} to the queue')
-                print(f'[{voice_client.guild.name}|{voice_client.channel.name}] Added {player.title} to the queue')
-            else:
-                print('play')
-                voice_client.play(self.queue[guild_id].pop(0), after=lambda e: self.bot.loop.create_task(self.play_next(voice_client)))
-                print('created', dir(interaction.followup))
-                await interaction.followup.send(f'Playing: {player.title}')
-                print(f'[{voice_client.guild.name}|{voice_client.channel.name}] Playing: {player.title}')
+            print('play', [player.title for player in self.queue.get(interaction.guild.id)])
+            voice_client.play(player, after=lambda e: self.bot.loop.create_task(self.play_next(voice_client)))
+            await interaction.followup.send(f'Playing: {player.title}')
+            print(f'[{voice_client.guild.name}|{voice_client.channel.name}] Playing: {player.title}')
         except Exception as e:
             print(f'Exception: {e}')
             await interaction.followup.send(f'Error occurred: {e}')
@@ -148,15 +147,21 @@ class Music(commands.Cog):
         await interaction.response.defer()
         await self._join(interaction)
         guild_id = interaction.guild.id
+        voice_client = interaction.guild.voice_client
         player = await YTDLSource.from_url(query, loop=self.bot.loop)
         self._add_to_song_queue(guild_id, player)
-        await self._play(player, interaction)
+        if voice_client.is_playing() or voice_client.is_paused():
+            print('connected', player.title)
+            await interaction.followup.send(f'Added {player.title} to the queue')
+            print(f'[{voice_client.guild.name}|{voice_client.channel.name}] Added {player.title} to the queue')
+        else:
+            await self._play(self.queue.get(guild_id).pop(0), interaction)
 
     @app_commands.command(name='pause', description='Pause or unpause current music')
     async def pause(self, interaction: discord.Interaction):
         voice_client = interaction.guild.voice_client
         if voice_client.is_playing():
-            voice_client.stop()
+            voice_client.pause()
             await interaction.response.send_message('Paused', delete_after=5)
         elif voice_client.is_paused():
             voice_client.resume()
@@ -167,18 +172,24 @@ class Music(commands.Cog):
         guild_id = interaction.guild.id
         voice_client = interaction.guild.voice_client
         if not voice_client or not voice_client.is_connected():
-            await interaction.response.send_message('Bot is not connected to voice channel', delete_after=5)
+            await interaction.response.send_message('Bot is not connected to the voice channel', delete_after=5)
             return False
         if voice_client.is_playing():
-            voice_client.stop()
+            print('is playing')
+            voice_client.pause()
+        print('self.queue.get(guild_id)', [player.title for player in self.queue.get(guild_id)])
+        await interaction.response.defer()
         if self.queue.get(guild_id):
+            print('in')
             await self._play(self.queue.get(guild_id).pop(0), interaction)
         else:
             await voice_client.disconnect(force=True)
+            await interaction.followup.send(f'Nothing to play, disconnecting', ephemeral=True)
 
     @app_commands.command(name='loop', description='Loop current queue')
     async def loop(self, interaction: discord.Interaction):
-        pass
+        self.loop = False if self.loop else True
+        await interaction.response.send_message(f'Loop {"enabled" if self.loop else "disabled"}', delete_after=10)
 
     @app_commands.command(name='remove', description='Removes chosen music from queue')
     async def remove_from_queue(self, interaction: discord.Interaction):
