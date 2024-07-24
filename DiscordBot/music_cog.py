@@ -62,6 +62,39 @@ class YTDLSource(discord.PCMVolumeTransformer):
         return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data)
 
 
+class MusicView(discord.ui.View):
+    def __init__(self, bot, cog, embed_message=None):
+        super().__init__(timeout=None)
+        self.bot = bot
+        self.cog = cog
+        self.embed_message = embed_message
+
+    @discord.ui.button(emoji='📝', style=discord.ButtonStyle.primary, custom_id='queue_button')
+    async def queue_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.queue(interaction)
+
+    @discord.ui.button(emoji='⏯️', style=discord.ButtonStyle.primary, custom_id='pause_button')
+    async def pause_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.pause(interaction, button)
+
+    @discord.ui.button(emoji='⏭️', style=discord.ButtonStyle.primary, custom_id='skip_button')
+    async def skip_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        print('skip button')
+        await self.cog.skip(interaction)
+
+    @discord.ui.button(emoji='🔄', style=discord.ButtonStyle.primary, custom_id='loop_button')
+    async def loop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.loop(interaction)
+
+    # @discord.ui.button(emoji='🔁', style=discord.ButtonStyle.primary, custom_id='repeat_button')
+    # async def repeat_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    #     await self.cog.repeat(interaction)
+
+    @discord.ui.button(emoji='❎', style=discord.ButtonStyle.primary, custom_id='remove_button')
+    async def remove_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.remove_from_queue(interaction)
+
+
 class Music(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -98,8 +131,7 @@ class Music(commands.Cog):
     @app_commands.command(name='join', description='Make the bot join the voice channel you are in')
     async def join(self, interaction: discord.Interaction):
         if await self._join(interaction):
-            await interaction.response.send_message(f'Joined **{interaction.user.voice.channel.name}** voice channel',
-                                                    ephemeral=True)
+            await interaction.response.send_message(f'Joined **{interaction.user.voice.channel.name}** voice channel', ephemeral=True)
 
     @app_commands.command(name='leave', description='Make the bot leave the voice channel it is in')
     async def leave(self, interaction: discord.Interaction):
@@ -110,10 +142,27 @@ class Music(commands.Cog):
         else:
             await interaction.response.send_message('Bot is not in a voice channel', ephemeral=True)
 
-    def edit_embed_message(self):
+    async def create_player_embed(self, interaction, player):
+        print('create_player_embed', player.data.keys())
+        embed = discord.Embed(
+            title='Now Playing',
+            description=f'{player.title}\nDuration: {player.data.get("duration")}',
+            color=discord.Color.from_rgb(51, 201, 0)
+        )
+        print('embed', embed)
+        embed.set_thumbnail(url=player.data.get('thumbnail'))
+        print('set_thumbnail', embed)
+        view = MusicView(self.bot, self)
+        print('view', view)
+        guild_id = interaction.guild.id
+        if guild_id in self.embed_messages:
+            del self.embed_messages[guild_id]
+        self.embed_messages[guild_id] = await interaction.followup.send(embed=embed, view=view)
+
+    async def edit_embed_message(self):
         pass
 
-    def _add_to_song_queue(self, guild_id, player):
+    async def _add_to_song_queue(self, guild_id, player):
         if guild_id not in self.queue:
             self.queue[guild_id] = []
         self.queue.get(guild_id).append(player)
@@ -122,23 +171,24 @@ class Music(commands.Cog):
     async def play_next(self, voice_client):
         print('Play next called')
         guild_id = voice_client.guild.id
-        if self.loop:
-            self._add_to_song_queue(guild_id, self.currently_playing.get(guild_id))
+        if self.loop_state.get(guild_id):
+            await self._add_to_song_queue(guild_id, self.currently_playing.get(guild_id))
         if guild_id in self.queue and self.queue.get(guild_id):
             player = await YTDLSource.from_url(self.queue.get(guild_id).pop(0), loop=self.bot.loop)
             voice_client.play(player, after=lambda e: self.bot.loop.create_task(self.play_next(voice_client)) if e is None else print(f'[{voice_client.guild.name}|{voice_client.channel.name}] Player error: {e}'))
             print(f'[{voice_client.guild.name}|{voice_client.channel.name}] Now playing next song in queue: {player.title}')
             # await self.update_player_embed(guild_id, player)
         else:
-            if not voice_client.is_connected() and not (voice_client.is_playing() or voice_client.is_paused()):
-                await asyncio.sleep(150)
-                if not self.queue.get(guild_id) and voice_client.is_connected() and not (voice_client.is_playing() or voice_client.is_paused()):
+            if voice_client.is_connected() and not (voice_client.is_playing() or voice_client.is_paused()):
+                # if not self.queue.get(guild_id) and voice_client.is_connected() and not (voice_client.is_playing() or voice_client.is_paused()):
                     # if guild_id in self.current_embed_messages:
                     #     try:
                     #         await self.current_embed_messages[guild_id].delete()
                     #     except discord.errors.NotFound:
                     #         pass  # Handle case where message is already deleted or doesn't exist
-                    await voice_client.disconnect()
+                await voice_client.disconnect()
+            else:
+                await asyncio.sleep(150)
 
     async def _play(self, player, interaction: discord.Interaction):
         print('_play', player.title)
@@ -146,7 +196,7 @@ class Music(commands.Cog):
         voice_client = interaction.guild.voice_client
         try:
             if self.loop_state.get(guild_id):
-                self._add_to_song_queue(guild_id, self.currently_playing.get(guild_id))
+                await self._add_to_song_queue(guild_id, self.currently_playing.get(guild_id))
             print('play', [player for player in self.queue.get(interaction.guild.id)])
             voice_client.play(player, after=lambda e: self.bot.loop.create_task(self.play_next(voice_client)))
             self.currently_playing[interaction.guild.id] = player.title
@@ -163,7 +213,7 @@ class Music(commands.Cog):
         guild_id = interaction.guild.id
         voice_client = interaction.guild.voice_client
         player = await YTDLSource.from_url(query, loop=self.bot.loop)
-        self._add_to_song_queue(guild_id, player.title)
+        await self._add_to_song_queue(guild_id, player.title)
         if voice_client.is_playing() or voice_client.is_paused():
             print('connected', player.title)
             await interaction.followup.send(f'Added {player.title} to the queue')
@@ -172,8 +222,8 @@ class Music(commands.Cog):
             current_music_title = self.queue.get(guild_id).pop(0)
             self.currently_playing[guild_id] = current_music_title
             await self._play(player, interaction)
+            await self.create_player_embed(interaction, player)
 
-    @app_commands.command(name='pause', description='Pause or unpause current music')
     async def pause(self, interaction: discord.Interaction):
         voice_client = interaction.guild.voice_client
         if voice_client.is_playing():
@@ -183,8 +233,8 @@ class Music(commands.Cog):
             voice_client.resume()
             await interaction.response.send_message('Resumed', delete_after=5)
 
-    @app_commands.command(name='skip', description='Skip current music')
     async def skip(self, interaction: discord.Interaction):
+        print('skip called')
         guild_id = interaction.guild.id
         voice_client = interaction.guild.voice_client
         if not voice_client or not voice_client.is_connected():
@@ -198,23 +248,20 @@ class Music(commands.Cog):
         if self.queue.get(guild_id):
             print('in', self.queue.get(guild_id))
             player = await YTDLSource.from_url(self.queue.get(guild_id).pop(0), loop=self.bot.loop)
-            print('player in skip called', )
+            print('player in skip called')
             await self._play(player, interaction)
         else:
             await voice_client.disconnect(force=True)
             await interaction.followup.send(f'Nothing to play, disconnecting', ephemeral=True)
 
-    @app_commands.command(name='loop', description='Loop current queue')
     async def loop(self, interaction: discord.Interaction):
         self.loop_state[interaction.guild.id] = False if self.loop_state.get(interaction.guild.id) else True
         print('loop called', self.loop_state)
         await interaction.response.send_message(f'Loop {"enabled" if self.loop_state[interaction.guild.id] else "disabled"}', delete_after=10)
 
-    @app_commands.command(name='queue', description='Shows queue')
     async def queue(self, interaction: discord.Interaction):
         pass
 
-    @app_commands.command(name='remove', description='Removes chosen music from queue')
     async def remove_from_queue(self, interaction: discord.Interaction):
         pass
 
