@@ -65,10 +65,22 @@ class YTDLSource(discord.PCMVolumeTransformer):
 class Music(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.loop_state = {}
         self.queue = {}
+        self.loop_state = {}
         self.embed_messages = {}
         self.currently_playing = {}
+
+    @commands.Cog.listener()
+    async def on_voice_state_update(self, member, before, after):
+        # Check if the bot is the one being disconnected
+        if member == self.bot.user:
+            if before.channel is not None and after.channel is None:
+                print(f'[{member.guild.name}|{before.channel.name}] Bot has been disconnected from {before.channel}')
+                guild_id = member.guild.id
+                del self.loop_state[guild_id]
+                del self.queue[guild_id]
+                del self.embed_messages[guild_id]
+                del self.currently_playing[guild_id]
 
     @staticmethod
     async def _join(interaction: discord.Interaction):
@@ -126,10 +138,6 @@ class Music(commands.Cog):
                     #         await self.current_embed_messages[guild_id].delete()
                     #     except discord.errors.NotFound:
                     #         pass  # Handle case where message is already deleted or doesn't exist
-                    del self.loop_state[guild_id]
-                    del self.queue[guild_id]
-                    del self.embed_messages[guild_id]
-                    del self.currently_playing[guild_id]
                     await voice_client.disconnect()
 
     async def _play(self, player, interaction: discord.Interaction):
