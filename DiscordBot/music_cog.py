@@ -65,14 +65,10 @@ class YTDLSource(discord.PCMVolumeTransformer):
 class Music(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.loop = False
+        self.loop_state = {}
         self.queue = {}
         self.embed_messages = {}
-
-    # @commands.Cog.listener()
-    # async def on_ready(self):
-    #     print("Syncing Bot Tree")
-    #     await self.bot.tree.sync()
+        self.currently_playing = {}
 
     @staticmethod
     async def _join(interaction: discord.Interaction):
@@ -108,14 +104,16 @@ class Music(commands.Cog):
     def _add_to_song_queue(self, guild_id, player):
         if guild_id not in self.queue:
             self.queue[guild_id] = []
-        self.queue[guild_id].append(player)
+        self.queue.get(guild_id).append(player)
         print('_add_to_song_queue', self.queue)
 
     async def play_next(self, voice_client):
         print('Play next called')
         guild_id = voice_client.guild.id
-        if guild_id in self.queue and self.queue[guild_id]:
-            player = self.queue[guild_id].pop(0)
+        if self.loop:
+            self._add_to_song_queue(guild_id, self.currently_playing.get(guild_id))
+        if guild_id in self.queue and self.queue.get(guild_id):
+            player = await YTDLSource.from_url(self.queue.get(guild_id).pop(0), loop=self.bot.loop)
             voice_client.play(player, after=lambda e: self.bot.loop.create_task(self.play_next(voice_client)) if e is None else print(f'[{voice_client.guild.name}|{voice_client.channel.name}] Player error: {e}'))
             print(f'[{voice_client.guild.name}|{voice_client.channel.name}] Now playing next song in queue: {player.title}')
             # await self.update_player_embed(guild_id, player)
@@ -128,14 +126,22 @@ class Music(commands.Cog):
                     #         await self.current_embed_messages[guild_id].delete()
                     #     except discord.errors.NotFound:
                     #         pass  # Handle case where message is already deleted or doesn't exist
+                    del self.loop_state[guild_id]
+                    del self.queue[guild_id]
+                    del self.embed_messages[guild_id]
+                    del self.currently_playing[guild_id]
                     await voice_client.disconnect()
 
     async def _play(self, player, interaction: discord.Interaction):
         print('_play', player.title)
+        guild_id = interaction.guild.id
         voice_client = interaction.guild.voice_client
         try:
-            print('play', [player.title for player in self.queue.get(interaction.guild.id)])
+            if self.loop_state.get(guild_id):
+                self._add_to_song_queue(guild_id, self.currently_playing.get(guild_id))
+            print('play', [player for player in self.queue.get(interaction.guild.id)])
             voice_client.play(player, after=lambda e: self.bot.loop.create_task(self.play_next(voice_client)))
+            self.currently_playing[interaction.guild.id] = player.title
             await interaction.followup.send(f'Playing: {player.title}')
             print(f'[{voice_client.guild.name}|{voice_client.channel.name}] Playing: {player.title}')
         except Exception as e:
@@ -149,13 +155,15 @@ class Music(commands.Cog):
         guild_id = interaction.guild.id
         voice_client = interaction.guild.voice_client
         player = await YTDLSource.from_url(query, loop=self.bot.loop)
-        self._add_to_song_queue(guild_id, player)
+        self._add_to_song_queue(guild_id, player.title)
         if voice_client.is_playing() or voice_client.is_paused():
             print('connected', player.title)
             await interaction.followup.send(f'Added {player.title} to the queue')
             print(f'[{voice_client.guild.name}|{voice_client.channel.name}] Added {player.title} to the queue')
         else:
-            await self._play(self.queue.get(guild_id).pop(0), interaction)
+            current_music_title = self.queue.get(guild_id).pop(0)
+            self.currently_playing[guild_id] = current_music_title
+            await self._play(player, interaction)
 
     @app_commands.command(name='pause', description='Pause or unpause current music')
     async def pause(self, interaction: discord.Interaction):
@@ -177,19 +185,26 @@ class Music(commands.Cog):
         if voice_client.is_playing():
             print('is playing')
             voice_client.pause()
-        print('self.queue.get(guild_id)', [player.title for player in self.queue.get(guild_id)])
+        print('self.queue.get(guild_id)', [player for player in self.queue.get(guild_id)])
         await interaction.response.defer()
         if self.queue.get(guild_id):
-            print('in')
-            await self._play(self.queue.get(guild_id).pop(0), interaction)
+            print('in', self.queue.get(guild_id))
+            player = await YTDLSource.from_url(self.queue.get(guild_id).pop(0), loop=self.bot.loop)
+            print('player in skip called', )
+            await self._play(player, interaction)
         else:
             await voice_client.disconnect(force=True)
             await interaction.followup.send(f'Nothing to play, disconnecting', ephemeral=True)
 
     @app_commands.command(name='loop', description='Loop current queue')
     async def loop(self, interaction: discord.Interaction):
-        self.loop = False if self.loop else True
-        await interaction.response.send_message(f'Loop {"enabled" if self.loop else "disabled"}', delete_after=10)
+        self.loop_state[interaction.guild.id] = False if self.loop_state.get(interaction.guild.id) else True
+        print('loop called', self.loop_state)
+        await interaction.response.send_message(f'Loop {"enabled" if self.loop_state[interaction.guild.id] else "disabled"}', delete_after=10)
+
+    @app_commands.command(name='queue', description='Shows queue')
+    async def queue(self, interaction: discord.Interaction):
+        pass
 
     @app_commands.command(name='remove', description='Removes chosen music from queue')
     async def remove_from_queue(self, interaction: discord.Interaction):
