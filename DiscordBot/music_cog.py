@@ -75,24 +75,25 @@ class MusicView(discord.ui.View):
 
     @discord.ui.button(emoji='⏯️', style=discord.ButtonStyle.primary, custom_id='pause_button')
     async def pause_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        print('pause button')
         await self.cog.pause(interaction, button)
 
     @discord.ui.button(emoji='⏭️', style=discord.ButtonStyle.primary, custom_id='skip_button')
     async def skip_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         print('skip button')
-        await self.cog.skip(interaction)
+        await self.cog.skip(interaction, button)
 
     @discord.ui.button(emoji='🔄', style=discord.ButtonStyle.primary, custom_id='loop_button')
     async def loop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog.loop(interaction)
+        await self.cog.loop(interaction, button)
 
     # @discord.ui.button(emoji='🔁', style=discord.ButtonStyle.primary, custom_id='repeat_button')
     # async def repeat_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-    #     await self.cog.repeat(interaction)
+    #     await self.cog.repeat(interaction, button)
 
     @discord.ui.button(emoji='❎', style=discord.ButtonStyle.primary, custom_id='remove_button')
     async def remove_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog.remove_from_queue(interaction)
+        await self.cog.remove_from_queue(interaction, button)
 
 
 class Music(commands.Cog):
@@ -142,12 +143,17 @@ class Music(commands.Cog):
         else:
             await interaction.response.send_message('Bot is not in a voice channel', ephemeral=True)
 
+    async def parse_duration(self, duration):
+        min, sec = divmod(duration, 60)
+        return f'{min}:{sec} min' if min else f'{sec} sec'
+
     async def edit_embed_message(self, interaction, player):
         print('create_player_embed', player.data.keys())
         embed = discord.Embed(
-            title='Now Playing',
-            description=f'{player.title}\nDuration: {player.data.get("duration")}',
-            color=discord.Color.from_rgb(51, 201, 0)
+            title='Playing',
+            description=f'[{player.title}]({player.data.get("original_url")})\n'
+                        f'Duration: {await self.parse_duration(player.data.get("duration"))}',
+            color=discord.Color.blurple()
         )
         print('embed', embed)
         embed.set_thumbnail(url=player.data.get('thumbnail'))
@@ -178,15 +184,8 @@ class Music(commands.Cog):
             voice_client.play(player, after=lambda e: self.bot.loop.create_task(self.play_next(voice_client, interaction)) if e is None else print(f'[{voice_client.guild.name}|{voice_client.channel.name}] Player error: {e}'))
             await self.edit_embed_message(interaction, player)
             print(f'[{voice_client.guild.name}|{voice_client.channel.name}] Now playing next song in queue: {player.title}')
-            # await self.update_player_embed(guild_id, player)
         else:
             if voice_client.is_connected() and not (voice_client.is_playing() or voice_client.is_paused()):
-                # if not self.queue.get(guild_id) and voice_client.is_connected() and not (voice_client.is_playing() or voice_client.is_paused()):
-                    # if guild_id in self.current_embed_messages:
-                    #     try:
-                    #         await self.current_embed_messages[guild_id].delete()
-                    #     except discord.errors.NotFound:
-                    #         pass  # Handle case where message is already deleted or doesn't exist
                 await voice_client.disconnect()
             else:
                 await asyncio.sleep(150)
@@ -224,8 +223,19 @@ class Music(commands.Cog):
             self.currently_playing[guild_id] = current_music_title
             await self._play(player, interaction)
 
-    async def pause(self, interaction: discord.Interaction):
+    async def _change_button_style(self, button: discord.ui.Button):
+        if button.style == discord.ButtonStyle.primary:
+            button.style = discord.ButtonStyle.secondary
+        else:
+            button.style = discord.ButtonStyle.primary
+        print('_change_button_style', button.style)
+        return button
+
+    async def pause(self, interaction: discord.Interaction, button: discord.ui.Button):
+        print('pause called')
         voice_client = interaction.guild.voice_client
+        button = await self._change_button_style(button)
+        await interaction.response.edit_message(view=button.view)
         if voice_client.is_playing():
             voice_client.pause()
             await interaction.response.send_message('Paused', delete_after=5)
@@ -233,7 +243,7 @@ class Music(commands.Cog):
             voice_client.resume()
             await interaction.response.send_message('Resumed', delete_after=5)
 
-    async def skip(self, interaction: discord.Interaction):
+    async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
         print('skip called')
         guild_id = interaction.guild.id
         voice_client = interaction.guild.voice_client
@@ -253,17 +263,23 @@ class Music(commands.Cog):
         else:
             await voice_client.disconnect(force=True)
             await interaction.followup.send(f'Nothing to play, disconnecting', ephemeral=True)
+        button = await self._change_button_style(button)
+        await interaction.response.edit_message(view=button.view)
 
-    async def loop(self, interaction: discord.Interaction):
+    async def loop(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.loop_state[interaction.guild.id] = False if self.loop_state.get(interaction.guild.id) else True
         print('loop called', self.loop_state)
+        button = await self._change_button_style(button)
+        await interaction.response.edit_message(view=button.view)
         await interaction.response.send_message(f'Loop {"enabled" if self.loop_state[interaction.guild.id] else "disabled"}', delete_after=10)
 
-    async def queue(self, interaction: discord.Interaction):
-        pass
+    async def queue(self, interaction: discord.Interaction, button: discord.ui.Button):
+        button = await self._change_button_style(button)
+        await interaction.response.edit_message(view=button.view)
 
-    async def remove_from_queue(self, interaction: discord.Interaction):
-        pass
+    async def remove_from_queue(self, interaction: discord.Interaction, button: discord.ui.Button):
+        button = await self._change_button_style(button)
+        await interaction.response.edit_message(view=button.view)
 
 
 async def setup(bot):
