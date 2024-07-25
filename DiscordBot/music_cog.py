@@ -108,12 +108,12 @@ class Music(commands.Cog):
         # Check if the bot is the one being disconnected
         if member == self.bot.user:
             if before.channel is not None and after.channel is None:
-                print(f'[{member.guild.name}|{before.channel.name}] Bot has been disconnected from {before.channel}')
                 guild_id = member.guild.id
-                del self.loop_state[guild_id]
-                del self.queue[guild_id]
-                del self.embed_messages[guild_id]
-                del self.currently_playing[guild_id]
+                self.loop_state.pop(guild_id, None)
+                self.queue.pop(guild_id, None)
+                self.embed_messages.pop(guild_id, None)
+                self.currently_playing.pop(guild_id, None)
+                print(f'[{member.guild.name}|{before.channel.name}] Bot has been disconnected from {before.channel}')
 
     @staticmethod
     async def _join(interaction: discord.Interaction):
@@ -142,7 +142,7 @@ class Music(commands.Cog):
         else:
             await interaction.response.send_message('Bot is not in a voice channel', ephemeral=True)
 
-    async def create_player_embed(self, interaction, player):
+    async def edit_embed_message(self, interaction, player):
         print('create_player_embed', player.data.keys())
         embed = discord.Embed(
             title='Now Playing',
@@ -156,11 +156,11 @@ class Music(commands.Cog):
         print('view', view)
         guild_id = interaction.guild.id
         if guild_id in self.embed_messages:
-            del self.embed_messages[guild_id]
-        self.embed_messages[guild_id] = await interaction.followup.send(embed=embed, view=view)
-
-    async def edit_embed_message(self):
-        pass
+            print('Already exist message')
+            await self.embed_messages.get(guild_id).edit(embed=embed, view=view)
+        else:
+            print('Create new message')
+            self.embed_messages[guild_id] = await interaction.followup.send(embed=embed, view=view)
 
     async def _add_to_song_queue(self, guild_id, player):
         if guild_id not in self.queue:
@@ -168,14 +168,15 @@ class Music(commands.Cog):
         self.queue.get(guild_id).append(player)
         print('_add_to_song_queue', self.queue)
 
-    async def play_next(self, voice_client):
+    async def play_next(self, voice_client, interaction):
         print('Play next called')
         guild_id = voice_client.guild.id
         if self.loop_state.get(guild_id):
             await self._add_to_song_queue(guild_id, self.currently_playing.get(guild_id))
         if guild_id in self.queue and self.queue.get(guild_id):
             player = await YTDLSource.from_url(self.queue.get(guild_id).pop(0), loop=self.bot.loop)
-            voice_client.play(player, after=lambda e: self.bot.loop.create_task(self.play_next(voice_client)) if e is None else print(f'[{voice_client.guild.name}|{voice_client.channel.name}] Player error: {e}'))
+            voice_client.play(player, after=lambda e: self.bot.loop.create_task(self.play_next(voice_client, interaction)) if e is None else print(f'[{voice_client.guild.name}|{voice_client.channel.name}] Player error: {e}'))
+            await self.edit_embed_message(interaction, player)
             print(f'[{voice_client.guild.name}|{voice_client.channel.name}] Now playing next song in queue: {player.title}')
             # await self.update_player_embed(guild_id, player)
         else:
@@ -198,9 +199,9 @@ class Music(commands.Cog):
             if self.loop_state.get(guild_id):
                 await self._add_to_song_queue(guild_id, self.currently_playing.get(guild_id))
             print('play', [player for player in self.queue.get(interaction.guild.id)])
-            voice_client.play(player, after=lambda e: self.bot.loop.create_task(self.play_next(voice_client)))
+            voice_client.play(player, after=lambda e: self.bot.loop.create_task(self.play_next(voice_client, interaction)))
             self.currently_playing[interaction.guild.id] = player.title
-            await interaction.followup.send(f'Playing: {player.title}')
+            await self.edit_embed_message(interaction, player)
             print(f'[{voice_client.guild.name}|{voice_client.channel.name}] Playing: {player.title}')
         except Exception as e:
             print(f'Exception: {e}')
@@ -216,13 +217,12 @@ class Music(commands.Cog):
         await self._add_to_song_queue(guild_id, player.title)
         if voice_client.is_playing() or voice_client.is_paused():
             print('connected', player.title)
-            await interaction.followup.send(f'Added {player.title} to the queue')
+            await interaction.followup.send(f'Added {player.title} to the queue', ephemeral=True)
             print(f'[{voice_client.guild.name}|{voice_client.channel.name}] Added {player.title} to the queue')
         else:
             current_music_title = self.queue.get(guild_id).pop(0)
             self.currently_playing[guild_id] = current_music_title
             await self._play(player, interaction)
-            await self.create_player_embed(interaction, player)
 
     async def pause(self, interaction: discord.Interaction):
         voice_client = interaction.guild.voice_client
