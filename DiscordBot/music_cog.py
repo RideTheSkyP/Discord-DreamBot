@@ -72,29 +72,29 @@ class MusicView(discord.ui.View):
         self.cog = cog
         self.embed_message = embed_message
 
-    @discord.ui.button(emoji='📝', style=discord.ButtonStyle.primary, custom_id='queue_button')
+    @discord.ui.button(emoji='📝', label='queue', style=discord.ButtonStyle.primary, custom_id='queue_button')
     async def queue_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.queue(interaction, button)
 
-    @discord.ui.button(emoji='⏯️', style=discord.ButtonStyle.primary, custom_id='pause_button')
+    @discord.ui.button(emoji='⏯️', label='(un)pause', style=discord.ButtonStyle.primary, custom_id='pause_button')
     async def pause_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         print('pause button')
         await self.cog.pause(interaction, button)
 
-    @discord.ui.button(emoji='⏭️', style=discord.ButtonStyle.primary, custom_id='skip_button')
+    @discord.ui.button(emoji='⏭️', label='skip', style=discord.ButtonStyle.primary, custom_id='skip_button')
     async def skip_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         print('skip button')
         await self.cog.skip(interaction, button)
 
-    @discord.ui.button(emoji='🔄', style=discord.ButtonStyle.primary, custom_id='loop_button')
+    @discord.ui.button(emoji='🔄', label='loop', style=discord.ButtonStyle.primary, custom_id='loop_button')
     async def loop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.loop(interaction, button)
 
-    @discord.ui.button(emoji='🔁', style=discord.ButtonStyle.primary, custom_id='repeat_button')
+    @discord.ui.button(emoji='🔁', label='repeat', style=discord.ButtonStyle.primary, custom_id='repeat_button')
     async def repeat_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.repeat(interaction, button)
 
-    @discord.ui.button(emoji='❎', style=discord.ButtonStyle.primary, custom_id='remove_button')
+    @discord.ui.button(emoji='❎', label='remove from queue', style=discord.ButtonStyle.primary, custom_id='remove_button')
     async def remove_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.remove_from_queue(interaction, button)
 
@@ -146,7 +146,8 @@ class Music(commands.Cog):
         else:
             await interaction.response.send_message('Bot is not in a voice channel', ephemeral=True)
 
-    async def parse_duration(self, duration):
+    @staticmethod
+    async def parse_duration(duration):
         min, sec = divmod(duration, 60)
         return f'{min}:{sec} min' if min else f'{sec} sec'
 
@@ -155,12 +156,12 @@ class Music(commands.Cog):
         duration = await self.parse_duration(player.duration)
         embed = discord.Embed(
             title='Playing',
-            description=f'[{player.title}]({player.data.original_url})\n'
+            description=f'[{player.title}]({player.original_url})\n'
                         f'Duration: {duration}',
             color=discord.Color.blurple()
         )
         print('embed', embed)
-        embed.set_thumbnail(url=player.data.thumbnail)
+        embed.set_thumbnail(url=player.thumbnail)
         print('set_thumbnail', embed)
         view = MusicView(self.bot, self)
         print('view', view)
@@ -227,7 +228,8 @@ class Music(commands.Cog):
             self.currently_playing[guild_id] = current_music_title
             await self._play(player, interaction)
 
-    async def _change_button_style(self, button: discord.ui.Button):
+    @staticmethod
+    async def _change_button_style(button: discord.ui.Button):
         if button.style == discord.ButtonStyle.primary:
             button.style = discord.ButtonStyle.secondary
         else:
@@ -247,9 +249,8 @@ class Music(commands.Cog):
             voice_client.resume()
             await interaction.response.send_message('Resumed', delete_after=5)
 
-    async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
-        print('skip called')
-        guild_id = interaction.guild.id
+    @staticmethod
+    async def _pause_if_playing(interaction: discord.Interaction):
         voice_client = interaction.guild.voice_client
         if not voice_client or not voice_client.is_connected():
             await interaction.response.send_message('Bot is not connected to the voice channel', delete_after=5)
@@ -257,6 +258,14 @@ class Music(commands.Cog):
         if voice_client.is_playing():
             print('is playing')
             voice_client.pause()
+        return True
+
+    async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
+        print('skip called')
+        guild_id = interaction.guild.id
+        voice_client = interaction.guild.voice_client
+        if not await self._pause_if_playing(interaction):
+            return False
         print('self.queue.get(guild_id)', [player for player in self.queue.get(guild_id)])
         await interaction.response.defer()
         if self.queue.get(guild_id):
@@ -272,13 +281,8 @@ class Music(commands.Cog):
 
     async def repeat(self, interaction: discord.Interaction, button: discord.ui.Button):
         guild_id = interaction.guild.id
-        voice_client = interaction.guild.voice_client
-        if not voice_client or not voice_client.is_connected():
-            await interaction.response.send_message('Bot is not connected to the voice channel', delete_after=5)
+        if not await self._pause_if_playing(interaction):
             return False
-        if voice_client.is_playing():
-            print('is playing')
-            voice_client.pause()
         await interaction.response.defer()
         print('in', self.queue.get(guild_id))
         player = await YTDLSource.from_url(self.currently_playing.get(guild_id), loop=self.bot.loop)
@@ -299,6 +303,10 @@ class Music(commands.Cog):
         await interaction.response.edit_message(view=button.view)
 
     async def remove_from_queue(self, interaction: discord.Interaction, button: discord.ui.Button):
+        button = await self._change_button_style(button)
+        await interaction.response.edit_message(view=button.view)
+
+    async def skip_to(self, interaction: discord.Interaction, button: discord.ui.Button):
         button = await self._change_button_style(button)
         await interaction.response.edit_message(view=button.view)
 
