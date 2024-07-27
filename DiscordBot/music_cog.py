@@ -11,16 +11,16 @@ from discord.ext import commands
 ytdl_format_options = {
     'format': 'bestaudio/best',
     'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
-    'bitrate': 320000,
+    # 'bitrate': 320000,
     'encoding': 'utf-8',
     'restrictfilenames': True,
     'noplaylist': True,
     'nocheckcertificate': True,
-    'socket_timeout': 10,
+    'socket_timeout': 5,
     'ignoreerrors': False,
     'logtostderr': False,
     'extract_flat': False,
-    'simulate': True,
+    # 'simulate': True,
     'prefer_ffmpeg': True,
     'quiet': True,
     # 'no_warnings': True,
@@ -43,6 +43,9 @@ ffmpeg_options = {
 }
 
 ytdl = yt_dlp.YoutubeDL(ytdl_format_options)
+
+# TODO ADD SEARCH BUTTON
+# TODO DISCONNECT IF CHANNEL IS EMPTY
 
 
 class YTDLSource(discord.PCMVolumeTransformer):
@@ -72,29 +75,30 @@ class MusicView(discord.ui.View):
         self.cog = cog
         self.embed_message = embed_message
 
-    @discord.ui.button(emoji='📝', label='queue', style=discord.ButtonStyle.primary, custom_id='queue_button')
+    @discord.ui.button(emoji='📝', label='Queue', style=discord.ButtonStyle.primary, custom_id='queue_button')
     async def queue_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.cog.queue(interaction, button)
+        print('queue button')
+        await self.cog.queue_command(interaction, button)
 
-    @discord.ui.button(emoji='⏯️', label='(un)pause', style=discord.ButtonStyle.primary, custom_id='pause_button')
+    @discord.ui.button(emoji='⏯️', label='(Un)pause', style=discord.ButtonStyle.primary, custom_id='pause_button')
     async def pause_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         print('pause button')
         await self.cog.pause(interaction, button)
 
-    @discord.ui.button(emoji='⏭️', label='skip', style=discord.ButtonStyle.primary, custom_id='skip_button')
+    @discord.ui.button(emoji='⏭️', label='Skip', style=discord.ButtonStyle.primary, custom_id='skip_button')
     async def skip_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         print('skip button')
         await self.cog.skip(interaction, button)
 
-    @discord.ui.button(emoji='🔄', label='loop', style=discord.ButtonStyle.primary, custom_id='loop_button')
+    @discord.ui.button(emoji='🔄', label='Loop', style=discord.ButtonStyle.primary, custom_id='loop_button')
     async def loop_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.loop(interaction, button)
 
-    @discord.ui.button(emoji='🔁', label='repeat', style=discord.ButtonStyle.primary, custom_id='repeat_button')
+    @discord.ui.button(emoji='🔁', label='Repeat', style=discord.ButtonStyle.primary, custom_id='repeat_button')
     async def repeat_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.repeat(interaction, button)
 
-    @discord.ui.button(emoji='❎', label='remove from queue', style=discord.ButtonStyle.primary, custom_id='remove_button')
+    @discord.ui.button(emoji='❎', label='Remove from queue', style=discord.ButtonStyle.primary, custom_id='remove_button')
     async def remove_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self.cog.remove_from_queue(interaction, button)
 
@@ -221,7 +225,8 @@ class Music(commands.Cog):
         await self._add_to_song_queue(guild_id, player.title)
         if voice_client.is_playing() or voice_client.is_paused():
             print('connected', player.title)
-            await interaction.followup.send(f'Added {player.title} to the queue', ephemeral=True)
+            # await interaction.followup.send(f'Added {player.title} to the queue', ephemeral=True)
+            await interaction.delete_original_response()
             print(f'[{voice_client.guild.name}|{voice_client.channel.name}] Added {player.title} to the queue')
         else:
             current_music_title = self.queue.get(guild_id).pop(0)
@@ -276,8 +281,6 @@ class Music(commands.Cog):
         else:
             await voice_client.disconnect(force=True)
             await interaction.followup.send(f'Nothing to play, disconnecting', ephemeral=True)
-        button = await self._change_button_style(button)
-        await interaction.response.edit_message(view=button.view)
 
     async def repeat(self, interaction: discord.Interaction, button: discord.ui.Button):
         guild_id = interaction.guild.id
@@ -298,9 +301,17 @@ class Music(commands.Cog):
         await interaction.response.edit_message(view=button.view)
         await interaction.response.send_message(f'Loop {"enabled" if self.loop_state[interaction.guild.id] else "disabled"}', delete_after=10)
 
-    async def queue(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def queue_command(self, interaction: discord.Interaction, button: discord.ui.Button):
         button = await self._change_button_style(button)
         await interaction.response.edit_message(view=button.view)
+        if button.style == discord.ButtonStyle.primary:
+            embed = interaction.message.embeds[0].clear_fields()
+        else:
+            for index, music in enumerate(self.queue.get(interaction.guild.id)):
+                interaction.message.embeds[0].add_field(name=music, value='', inline=False)
+            embed = interaction.message.embeds[0]
+        await interaction.message.edit(embed=embed)
+        print('Done')
 
     async def remove_from_queue(self, interaction: discord.Interaction, button: discord.ui.Button):
         button = await self._change_button_style(button)
