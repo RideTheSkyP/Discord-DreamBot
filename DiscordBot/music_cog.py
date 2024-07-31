@@ -52,11 +52,11 @@ class YTDLSource(discord.PCMVolumeTransformer):
     def __init__(self, source, *, data, volume=0.5):
         super().__init__(source, volume)
         self.data = data
-        self.title = data.get('title')
         self.url = data.get('url')
-        self.original_url = data.get('original_url')
-        self.thumbnail = data.get('thumbnail')
+        self.title = data.get('title')
         self.duration = data.get('duration')
+        self.thumbnail = data.get('thumbnail')
+        self.original_url = data.get('original_url')
 
     @classmethod
     async def from_url(cls, url, *, loop=None, stream=True):
@@ -109,6 +109,7 @@ class Music(commands.Cog):
         self.queue = {}
         self.loop_state = {}
         self.embed_messages = {}
+        self.playlist_state = {}
         self.currently_playing = {}
 
     @commands.Cog.listener()
@@ -239,7 +240,6 @@ class Music(commands.Cog):
             button.style = discord.ButtonStyle.secondary
         else:
             button.style = discord.ButtonStyle.primary
-        print('_change_button_style', button.style)
         return button
 
     async def pause(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -302,20 +302,61 @@ class Music(commands.Cog):
         await interaction.response.send_message(f'Loop {"enabled" if self.loop_state[interaction.guild.id] else "disabled"}', delete_after=10)
 
     async def queue_command(self, interaction: discord.Interaction, button: discord.ui.Button):
+        print('queue command')
         button = await self._change_button_style(button)
-        await interaction.response.edit_message(view=button.view)
+        print('button', button, dir(button), button.view, dir(button.view))
+        await interaction.message.edit(view=button.view)
+        print('edited')
         if button.style == discord.ButtonStyle.primary:
             embed = interaction.message.embeds[0].clear_fields()
         else:
             for index, music in enumerate(self.queue.get(interaction.guild.id)):
-                interaction.message.embeds[0].add_field(name=music, value='', inline=False)
+                interaction.message.embeds[0].add_field(name=f'{index}: {music}', value='', inline=False)
             embed = interaction.message.embeds[0]
+        print('q embed', embed, dir(embed))
         await interaction.message.edit(embed=embed)
-        print('Done')
+        print('qc done')
 
     async def remove_from_queue(self, interaction: discord.Interaction, button: discord.ui.Button):
+        print('remove_from_queue')
         button = await self._change_button_style(button)
-        await interaction.response.edit_message(view=button.view)
+        view = button.view
+        await interaction.message.edit(view=view)
+        guild_queue = self.queue.get(interaction.guild.id)
+        print(view.to_components())
+        print('view.queue_button', view.queue_button)
+        print('view.queue_button, dir', dir(view.queue_button))
+
+        if view.queue_button.style == discord.ButtonStyle.secondary:
+            print('queue style secondary')
+            await self.queue_command(interaction, view.queue_button)
+
+        async def button_callback(interaction):
+            # Add selected field information
+            selected_field_index = int(interaction.data['custom_id'])
+            embed = interaction.message.embeds[0]
+            print('view', dir(view))
+            print('embed', dir(embed))
+            guild_queue.pop(selected_field_index)
+            embed = embed.remove_field(selected_field_index)
+            # embed = discord.Embed(title=f'Selected {selected_field}')
+            # embed.add_field(name=f'{selected_field}', value=f'Details about {selected_field}', inline=False)
+            await interaction.response.edit_message(embed=embed, view=view)
+
+        embed = interaction.message.embeds[0]
+        if button.style == discord.ButtonStyle.primary:
+            embed = embed.clear_fields()
+        else:
+            print('else')
+            for index, music in enumerate(guild_queue):
+                embed.add_field(name=music, value='', inline=False)
+                button = discord.ui.Button(label=f'{index}: {music}', custom_id=f'{index}')
+                button.callback = button_callback
+                view.add_item(button)
+            print('else view', view, dir(view))
+            # embed = interaction.message.embeds[0]
+        print('edited')
+        await interaction.message.edit(embed=embed, view=view)
 
     async def skip_to(self, interaction: discord.Interaction, button: discord.ui.Button):
         button = await self._change_button_style(button)
