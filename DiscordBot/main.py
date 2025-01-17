@@ -27,13 +27,13 @@ bot = commands.Bot(
 @bot.event
 async def on_ready():
     print(f'Logged in as {bot.user} (ID: {bot.user.id})')
-    clear = bot.tree.clear_commands(guild=discord.Object(GUILD_ID))
-    print('clear', clear)
-    synced = await bot.tree.sync(guild=discord.Object(GUILD_ID))
+    # clear = bot.tree.clear_commands(guild=discord.Object(GUILD_ID))
+    # print('clear', clear)
+    synced = await bot.tree.sync()
     print('synced', synced)
     print('tree', bot.tree, vars(bot.tree))
     print('comms', bot.tree.get_commands())
-    print('comms guild', bot.tree.get_commands(guild=discord.Object(GUILD_ID)))
+    # print('comms guild', bot.tree.get_commands(guild=discord.Object(GUILD_ID)))
 
 
 @bot.command(name='sync')
