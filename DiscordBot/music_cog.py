@@ -124,15 +124,25 @@ class Music(commands.Cog):
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
-        # Check if the bot is the one being disconnected
-        if member == self.bot.user:
+        guild = member.guild
+        guild_id = guild.id
+        voice_client = guild.voice_client
+        voice_channel_members_len = len(voice_client.channel.members)
+        if member == self.bot.user or (voice_channel_members_len == 1 and voice_client.channel.members[0] == self.bot.user):
+            # Check if the bot is the one being disconnected
             if before.channel is not None and after.channel is None:
-                guild_id = member.guild.id
-                self.loop_state.pop(guild_id, None)
-                self.queue.pop(guild_id, None)
-                self.embed_messages.pop(guild_id, None)
-                self.currently_playing.pop(guild_id, None)
+                await self._clear_guild_info(guild_id)
                 print(f'[{member.guild.name}|{before.channel.name}] Bot has been disconnected from {before.channel}')
+            # Check if the bot was 1 left in channel
+            elif before.channel is not None and after.channel is not None:
+                await voice_client.disconnect()
+                await self._clear_guild_info(guild_id)
+
+    async def _clear_guild_info(self, guild_id):
+        self.loop_state.pop(guild_id, None)
+        self.queue.pop(guild_id, None)
+        self.embed_messages.pop(guild_id, None)
+        self.currently_playing.pop(guild_id, None)
 
     @staticmethod
     async def _join(interaction: discord.Interaction):
@@ -163,6 +173,7 @@ class Music(commands.Cog):
     def _prepare_button_styles_dict_for_guild(self, guild_id):
         if self.loop_state.get(guild_id):
             return {"loop_button": discord.ButtonStyle.secondary}
+        return None
 
     @staticmethod
     async def parse_duration(duration):
@@ -181,7 +192,6 @@ class Music(commands.Cog):
         )
         embed.set_thumbnail(url=player.thumbnail)
         button_styles = self._prepare_button_styles_dict_for_guild(guild_id)
-        print("button_styles")
         view = MusicView(self.bot, self, button_styles=button_styles)
         if guild_id in self.embed_messages:
             await self.embed_messages.get(guild_id).edit(embed=embed, view=view)
@@ -253,13 +263,6 @@ class Music(commands.Cog):
             button.style = discord.ButtonStyle.primary
         return button
 
-    async def get_button(self, button_name: str):
-        view = MusicView(self.bot, self)
-        buttons = [child for child in view.children if isinstance(child, discord.ui.Button)]
-        for button in buttons:
-            if button.label == button_name:
-                return button
-
     async def pause(self, interaction: discord.Interaction, button: discord.ui.Button):
         print('pause called')
         voice_client = interaction.guild.voice_client
@@ -273,7 +276,8 @@ class Music(commands.Cog):
             await interaction.response.send_message('Resumed', delete_after=5)
 
     @staticmethod
-    async def _pause_if_playing(interaction: discord.Interaction):
+    async def _pause_state_control(interaction: discord.Interaction):
+        print("_pause_state_control")
         voice_client = interaction.guild.voice_client
         if not voice_client or not voice_client.is_connected():
             await interaction.response.send_message('Bot is not connected to the voice channel', delete_after=5)
@@ -285,33 +289,32 @@ class Music(commands.Cog):
 
     async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
         print('skip called')
-        print(button)
-        print(button.view)
-        print(dir(button.view))
-        print(interaction)
-        print(dir(interaction))
         guild_id = interaction.guild.id
         voice_client = interaction.guild.voice_client
-        loop_button = await self.get_button("Loop")
-        if not await self._pause_if_playing(interaction):
+        if not await self._pause_state_control(interaction):
             return False
-        print('self.queue.get(guild_id)', [player for player in self.queue.get(guild_id)])
         await interaction.response.defer()
-        if self.queue.get(guild_id):
-            print('in', self.queue.get(guild_id))
-            player = await YTDLSource.from_url(self.queue.get(guild_id).pop(0), loop=self.bot.loop)
-            print('player in skip called')
-            await self._play(player, interaction)
-            if self.loop_state.get(guild_id):
-                print("INTO LOOP STATE")
-                await self.loop(interaction, loop_button, change_state=False)
-        else:
+        queue = self.queue.get(guild_id)
+        print("queue", queue)
+        print("self.loop_state.get(guild_id)", self.loop_state.get(guild_id))
+        if not queue and not self.loop_state.get(guild_id):
             await voice_client.disconnect(force=True)
             await interaction.followup.send(f'Nothing to play, disconnecting', ephemeral=True)
+            return None
+        elif not queue and self.loop_state.get(guild_id):
+            self.queue[guild_id] = [self.currently_playing.get(guild_id)]
+        print('in', self.queue.get(guild_id))
+        player = await YTDLSource.from_url(self.queue.get(guild_id).pop(0), loop=self.bot.loop)
+        print('player in skip called')
+        await self._play(player, interaction)
+        button = await self._change_button_style(button)
+        await interaction.response.edit_message(view=button.view)
+        # else:
+
 
     async def repeat(self, interaction: discord.Interaction, button: discord.ui.Button):
         guild_id = interaction.guild.id
-        if not await self._pause_if_playing(interaction):
+        if not await self._pause_state_control(interaction):
             return False
         await interaction.response.defer()
         print('in', self.queue.get(guild_id))
@@ -321,23 +324,13 @@ class Music(commands.Cog):
         button = await self._change_button_style(button)
         await interaction.response.edit_message(view=button.view)
 
-    async def loop(self, interaction: discord.Interaction, button: discord.ui.Button, change_state=True):
-        # print(button)
-        # print(button.view)
-        # print(dir(button.view))
-        # print(interaction)
-        # print(dir(interaction))
-        # loop_button = await self.get_button("Loop")
-        # print("SIMULATED")
-        # print(loop_button)
-        # print(loop_button.view)
-        # print(dir(loop_button.view))
+    async def loop(self, interaction: discord.Interaction, button: discord.ui.Button):
+        guild_id = interaction.guild.id
+        self.loop_state[guild_id] = False if self.loop_state.get(guild_id) else True
+        print('loop called', self.loop_state)
         print(self.embed_messages.get(interaction.guild.id).id)
         print(self.embed_messages.get(interaction.guild.id).channel)
         print(dir(self.embed_messages.get(interaction.guild.id)))
-        if change_state:
-            self.loop_state[interaction.guild.id] = False if self.loop_state.get(interaction.guild.id) else True
-        print('loop called', self.loop_state, change_state)
         button = await self._change_button_style(button)
         print(button)
         await interaction.response.edit_message(view=button.view)
