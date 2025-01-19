@@ -1,13 +1,15 @@
+from datetime import timedelta
+
 import yt_dlp
 import asyncio
 import discord
 from discord import app_commands, WebhookMessage
-from discord.ext import commands
+from discord.ext import commands, tasks
+from django.utils.datetime_safe import datetime
 
 # Suppress noise about console usage from errors
 # yt_dlp.utils.bug_reports_message = lambda: ''
 
-# print('music_cog')
 ytdl_format_options = {
     'format': 'bestaudio/best',
     'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
@@ -45,7 +47,7 @@ ffmpeg_options = {
 ytdl = yt_dlp.YoutubeDL(ytdl_format_options)
 
 # TODO ADD SEARCH BUTTON
-# TODO DISCONNECT IF CHANNEL IS EMPTY
+# DONE DISCONNECT IF CHANNEL IS EMPTY
 # TODO Handle age restricted videos
 # TODO Queue max 25 fields/paging
 # TODO leave on pause timeout
@@ -118,9 +120,20 @@ class Music(commands.Cog):
         self.bot = bot
         self.queue = {}
         self.loop_state = {}
+        self.voice_clients = {}
         self.embed_messages = {}
         self.playlist_state = {}
         self.currently_playing = {}
+        # self.background_task.start()
+
+    def cog_unload(self):
+        self.background_task.cancel()
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        print("on_ready")
+        if not self.background_task.is_running():
+            self.background_task.start()
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
@@ -149,7 +162,7 @@ class Music(commands.Cog):
         voice = interaction.user.voice
         if voice is None or voice.channel is None:
             await interaction.response.send_message('You are not connected to a voice channel.', ephemeral=True)
-            return None
+            return False
         channel = voice.channel
         if interaction.guild.voice_client is not None:
             await interaction.guild.voice_client.move_to(channel)
@@ -407,6 +420,26 @@ class Music(commands.Cog):
     async def skip_to(self, interaction: discord.Interaction, button: discord.ui.Button):
         button = await self._change_button_style(button)
         await interaction.response.edit_message(view=button.view)
+
+    @tasks.loop(seconds=60)
+    async def background_task(self):
+        print("background_task")
+        for guild in self.bot.guilds:
+            voice_client = guild.voice_client
+            guild_id = guild.id
+            guild_voice_client = self.voice_clients.get(guild_id)
+            if voice_client and voice_client.is_paused() and not guild_voice_client:
+                self.voice_clients[guild_id] = datetime.now()
+            elif voice_client and voice_client.is_playing() and guild_voice_client:
+                del self.voice_clients[guild_id]
+            elif voice_client and guild_voice_client:
+                if datetime.now() - guild_voice_client > timedelta(minutes=5):
+                    await voice_client.disconnect()
+                    del self.voice_clients[guild_id]
+
+    @background_task.before_loop
+    async def before_background_task(self):
+        await self.bot.wait_until_ready()
 
 
 async def setup(bot):
